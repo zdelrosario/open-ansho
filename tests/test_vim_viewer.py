@@ -314,3 +314,127 @@ def test_lowercase_e_still_stops_before_punctuation_unlike_shift_e(qtbot):
     QTest.keyClick(viewer, Qt.Key_E)
 
     assert viewer.toPlainText()[viewer.textCursor().position()] == "o"  # end of "Hello", no comma
+
+
+def test_slash_enters_search_mode_and_jumps_progressively_to_first_match(qtbot):
+    viewer = _make_viewer(qtbot, "Hello frustrating world.")
+    viewer.setFocus()
+
+    QTest.keyClick(viewer, Qt.Key_Slash)
+    assert viewer.mode == VimTextViewer.SEARCH
+
+    QTest.keyClicks(viewer, "wor")
+
+    assert viewer.textCursor().selectedText() == "wor"
+    assert viewer.textCursor().selectionStart() == 18
+
+
+def test_search_pattern_is_a_regular_expression(qtbot):
+    viewer = _make_viewer(qtbot, "Hello frustrating world.")
+    viewer.setFocus()
+
+    QTest.keyClick(viewer, Qt.Key_Slash)
+    QTest.keyClicks(viewer, "w.rld")
+
+    assert viewer.textCursor().selectedText() == "world"
+
+
+def test_enter_commits_search_and_leaves_cursor_on_match_without_selection(qtbot):
+    viewer = _make_viewer(qtbot, "Hello frustrating world.")
+    viewer.setFocus()
+
+    QTest.keyClick(viewer, Qt.Key_Slash)
+    QTest.keyClicks(viewer, "wor")
+    QTest.keyClick(viewer, Qt.Key_Return)
+
+    assert viewer.mode == VimTextViewer.NORMAL
+    assert not viewer.textCursor().hasSelection()
+    assert viewer.textCursor().position() == 18
+
+
+def test_escape_during_search_cancels_and_restores_cursor_position(qtbot):
+    viewer = _make_viewer(qtbot, "Hello frustrating world.")
+    viewer.setFocus()
+    cursor = viewer.textCursor()
+    cursor.setPosition(6)
+    viewer.setTextCursor(cursor)
+
+    QTest.keyClick(viewer, Qt.Key_Slash)
+    QTest.keyClicks(viewer, "wor")
+    assert viewer.textCursor().hasSelection()
+
+    QTest.keyClick(viewer, Qt.Key_Escape)
+
+    assert viewer.mode == VimTextViewer.NORMAL
+    assert not viewer.textCursor().hasSelection()
+    assert viewer.textCursor().position() == 6
+
+
+def test_n_and_shift_n_cycle_forward_and_backward_through_matches(qtbot):
+    viewer = _make_viewer(qtbot, "cat hat cat mat cat")
+    viewer.setFocus()
+
+    QTest.keyClick(viewer, Qt.Key_Slash)
+    QTest.keyClicks(viewer, "cat")
+    QTest.keyClick(viewer, Qt.Key_Return)
+    assert viewer.mode == VimTextViewer.NORMAL
+    assert not viewer.textCursor().hasSelection()
+    assert viewer.textCursor().position() == 0
+
+    QTest.keyClick(viewer, Qt.Key_N)
+    assert viewer.mode == VimTextViewer.VISUAL
+    assert (viewer.textCursor().selectionStart(), viewer.textCursor().selectionEnd()) == (8, 11)
+
+    QTest.keyClick(viewer, Qt.Key_N)
+    assert (viewer.textCursor().selectionStart(), viewer.textCursor().selectionEnd()) == (16, 19)
+
+    QTest.keyClick(viewer, Qt.Key_N)  # wraps back to the first match
+    assert (viewer.textCursor().selectionStart(), viewer.textCursor().selectionEnd()) == (0, 3)
+
+    QTest.keyClick(viewer, Qt.Key_N, Qt.ShiftModifier)  # wraps backward to the last match
+    assert (viewer.textCursor().selectionStart(), viewer.textCursor().selectionEnd()) == (16, 19)
+
+    QTest.keyClick(viewer, Qt.Key_N, Qt.ShiftModifier)
+    assert (viewer.textCursor().selectionStart(), viewer.textCursor().selectionEnd()) == (8, 11)
+    assert viewer.mode == VimTextViewer.VISUAL
+
+
+def test_n_without_a_committed_search_does_nothing(qtbot):
+    viewer = _make_viewer(qtbot, "cat hat cat")
+    viewer.setFocus()
+
+    QTest.keyClick(viewer, Qt.Key_N)
+
+    assert viewer.textCursor().position() == 0
+    assert viewer.mode == VimTextViewer.NORMAL
+
+
+def test_lowercase_search_pattern_matches_either_case(qtbot):
+    viewer = _make_viewer(qtbot, "Hello World")
+    viewer.setFocus()
+
+    QTest.keyClick(viewer, Qt.Key_Slash)
+    QTest.keyClicks(viewer, "world")
+
+    assert viewer.textCursor().selectedText() == "World"
+
+
+def test_uppercase_letter_in_pattern_matches_only_uppercase(qtbot):
+    viewer = _make_viewer(qtbot, "hello World")
+    viewer.setFocus()
+
+    QTest.keyClick(viewer, Qt.Key_Slash)
+    QTest.keyClicks(viewer, "World")
+
+    assert viewer.textCursor().selectedText() == "World"
+
+
+def test_uppercase_letter_in_pattern_does_not_match_lowercase(qtbot):
+    viewer = _make_viewer(qtbot, "hello world")
+    viewer.setFocus()
+
+    QTest.keyClick(viewer, Qt.Key_Slash)
+    QTest.keyClicks(viewer, "World")
+
+    assert not viewer.textCursor().hasSelection()
+    assert viewer.textCursor().position() == 0

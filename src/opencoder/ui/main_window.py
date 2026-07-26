@@ -118,6 +118,7 @@ class MainWindow(QMainWindow):
         self.viewer.setObjectName("viewerPane")
         self.viewer.selectionChanged.connect(self._on_viewer_selection_changed)
         self.viewer.modeChanged.connect(self._on_viewer_mode_changed)
+        self.viewer.searchTextChanged.connect(self._on_viewer_search_text_changed)
 
         self.code_tree = CodeTreeWidget()
         self.code_tree.setHeaderHidden(True)
@@ -194,6 +195,9 @@ class MainWindow(QMainWindow):
         self.vim_mode_label = QLabel()
         self.statusBar().addPermanentWidget(self.vim_mode_label)
 
+        self.search_label = QLabel()
+        self.statusBar().addPermanentWidget(self.search_label)
+
         self.setStyleSheet(PANE_FOCUS_STYLE)
         self._panes = (self.document_list, self.viewer, self.codebook_pane, self.segments_pane)
 
@@ -214,17 +218,29 @@ class MainWindow(QMainWindow):
 
     def eventFilter(self, watched, event) -> bool:
         if event.type() == QEvent.KeyPress:
+            # While the viewer is composing a search string, key presses that would
+            # otherwise act on its (search-preview) selection must fall through to
+            # VimTextViewer's own key handling instead, so typed text always reaches
+            # the search buffer rather than being hijacked as a coding shortcut.
+            viewer_searching = (
+                QApplication.focusWidget() is self.viewer
+                and self.viewer.mode == VimTextViewer.SEARCH
+            )
             if event.key() == Qt.Key_Space:
-                if QApplication.focusWidget() is not self.code_filter_input:
+                if not viewer_searching and QApplication.focusWidget() is not self.code_filter_input:
                     self.code_filter_input.setFocus()
                     self.code_filter_input.selectAll()
                     return True
             elif event.key() in (Qt.Key_Up, Qt.Key_Down):
-                if QApplication.focusWidget() is self.viewer and self.viewer.textCursor().hasSelection():
+                if (
+                    not viewer_searching
+                    and QApplication.focusWidget() is self.viewer
+                    and self.viewer.textCursor().hasSelection()
+                ):
                     self._cycle_matched_code(-1 if event.key() == Qt.Key_Up else 1)
                     return True
             elif event.key() in (Qt.Key_Return, Qt.Key_Enter):
-                if QApplication.focusWidget() is self.viewer:
+                if not viewer_searching and QApplication.focusWidget() is self.viewer:
                     current = self.code_tree.currentItem()
                     if current is not None and self._apply_code_to_viewer_selection(
                         current.data(0, Qt.UserRole)
@@ -240,6 +256,14 @@ class MainWindow(QMainWindow):
                     elif self.viewer.mode == VimTextViewer.NORMAL:
                         self._delete_segments_at_cursor()
                         return True
+            elif event.key() == Qt.Key_C:
+                if QApplication.focusWidget() is self.viewer and self.viewer.mode == VimTextViewer.NORMAL:
+                    self._jump_to_adjacent_segment(1)
+                    return True
+            elif event.key() == Qt.Key_P:
+                if QApplication.focusWidget() is self.viewer and self.viewer.mode == VimTextViewer.NORMAL:
+                    self._jump_to_adjacent_segment(-1)
+                    return True
         return super().eventFilter(watched, event)
 
     def _build_menu(self) -> None:
@@ -326,7 +350,15 @@ class MainWindow(QMainWindow):
         self._refresh_codes()
 
     def _on_viewer_mode_changed(self, mode: str) -> None:
-        self.vim_mode_label.setText("-- VISUAL --" if mode == VimTextViewer.VISUAL else "")
+        if mode == VimTextViewer.VISUAL:
+            self.vim_mode_label.setText("-- VISUAL --")
+        elif mode == VimTextViewer.SEARCH:
+            self.vim_mode_label.setText("-- SEARCH --")
+        else:
+            self.vim_mode_label.setText("")
+
+    def _on_viewer_search_text_changed(self, text: str) -> None:
+        self.search_label.setText(f"/{text}" if text else "")
 
     def _on_code_selected(
         self, current: QTreeWidgetItem | None, _previous: QTreeWidgetItem | None
@@ -599,6 +631,35 @@ class MainWindow(QMainWindow):
         self._refresh_codes()
         self._refresh_highlights()
         self._refresh_segments_for_selected_code()
+
+    def _jump_to_adjacent_segment(self, direction: int) -> None:
+        segment = self._adjacent_segment(direction)
+        if segment is None:
+            return
+        cursor = self.viewer.textCursor()
+        cursor.setPosition(segment.end_offset)
+        cursor.setPosition(segment.start_offset, QTextCursor.KeepAnchor)
+        self.viewer.setTextCursor(cursor)
+        self.viewer.ensureCursorVisible()
+
+    def _adjacent_segment(self, direction: int):
+        """Segment before/after the cursor, wrapping around the document."""
+        if self.conn is None or self._current_document_id is None:
+            return None
+        segments = sorted(
+            db.list_segments_for_document(self.conn, self._current_document_id),
+            key=lambda s: (s.start_offset, s.end_offset),
+        )
+        if not segments:
+            return None
+
+        cursor = self.viewer.textCursor()
+        position = cursor.selectionStart() if cursor.hasSelection() else cursor.position()
+        if direction > 0:
+            later = [s for s in segments if s.start_offset > position]
+            return later[0] if later else segments[0]
+        earlier = [s for s in segments if s.start_offset < position]
+        return earlier[-1] if earlier else segments[-1]
 
     def _set_connection(self, conn: sqlite3.Connection, path: Path) -> None:
         if self.conn is not None:
