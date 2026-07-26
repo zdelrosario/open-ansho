@@ -195,7 +195,7 @@ def test_x_does_nothing_outside_any_segment(qtbot, tmp_path):
     assert len(segments) == 1
 
 
-def test_x_does_nothing_in_visual_mode(qtbot, tmp_path):
+def test_x_in_visual_mode_without_selection_does_nothing(qtbot, tmp_path):
     window = MainWindow()
     qtbot.addWidget(window)
     window.show()
@@ -213,6 +213,38 @@ def test_x_does_nothing_in_visual_mode(qtbot, tmp_path):
 
     segments = db.list_segments_for_document(window.conn, window._current_document_id)
     assert len(segments) == 1
+
+
+def test_x_in_visual_mode_deletes_segments_intersecting_selection(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    _open_project_with_document(window, tmp_path, "Hello frustrating world.")
+    code_a = window.add_code("Frustration")
+    code_b = window.add_code("Greeting")
+    window.apply_segment(code_a.id, 6, 17)  # "frustrating"
+    window.apply_segment(code_b.id, 0, 5)  # "Hello", outside the selection below
+
+    _place_cursor(window, 8)  # inside "frustrating"
+    window.viewer.setFocus()
+    qtbot.waitUntil(lambda: window.viewer.hasFocus())
+
+    QTest.keyClick(window.viewer, Qt.Key_V)
+    for _ in range(3):
+        QTest.keyClick(window.viewer, Qt.Key_L)
+
+    segments = db.list_segments_for_document(window.conn, window._current_document_id)
+    assert len(segments) == 2  # sanity check: nothing deleted yet
+
+    QTest.keyClick(window.viewer, Qt.Key_X)
+
+    segments = db.list_segments_for_document(window.conn, window._current_document_id)
+    assert len(segments) == 1
+    assert segments[0].code_id == code_b.id
+
+    # x also exits visual mode, like Enter does.
+    assert window.viewer.mode == VimTextViewer.NORMAL
+    assert not window.viewer.textCursor().hasSelection()
 
 
 def test_x_excludes_segment_ending_exactly_at_cursor(qtbot, tmp_path):

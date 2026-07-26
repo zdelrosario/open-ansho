@@ -114,6 +114,46 @@ def test_capital_g_moves_to_document_end(qtbot):
     QTest.keyClick(viewer, Qt.Key_G, Qt.ShiftModifier)
 
     assert viewer.textCursor().atEnd()
+    assert not viewer.textCursor().hasSelection()
+
+
+def test_capital_h_moves_to_first_visible_line(qtbot):
+    text = "\n".join(f"Line {i}" for i in range(50))
+    viewer = _make_viewer(qtbot, text)
+    viewer.setFocus()
+
+    QTest.keyClick(viewer, Qt.Key_J)
+    QTest.keyClick(viewer, Qt.Key_J)
+    assert viewer.textCursor().blockNumber() == 2
+
+    QTest.keyClick(viewer, Qt.Key_H, Qt.ShiftModifier)
+
+    assert viewer.textCursor().position() == 0
+    assert not viewer.textCursor().hasSelection()
+
+
+def test_capital_l_moves_to_last_visible_line(qtbot):
+    text = "\n".join(f"Line {i}" for i in range(50))
+    viewer = _make_viewer(qtbot, text)
+    viewer.setFocus()
+
+    starts = viewer._visible_line_starts()
+    assert len(starts) >= 2  # sanity: the viewport shows multiple lines
+    expected_position = starts[-1]
+
+    QTest.keyClick(viewer, Qt.Key_L, Qt.ShiftModifier)
+
+    assert viewer.textCursor().position() == expected_position
+    assert not viewer.textCursor().hasSelection()
+
+
+def test_capital_l_falls_back_to_the_only_visible_line(qtbot):
+    viewer = _make_viewer(qtbot, "Just one line of text.")
+    viewer.setFocus()
+
+    QTest.keyClick(viewer, Qt.Key_L, Qt.ShiftModifier)
+
+    assert viewer.textCursor().position() == 0
 
 
 def test_gg_moves_to_document_start(qtbot):
@@ -126,6 +166,18 @@ def test_gg_moves_to_document_start(qtbot):
     QTest.keyClick(viewer, Qt.Key_G)
 
     assert viewer.textCursor().position() == 0
+
+
+def test_cursor_highlight_stays_visible_at_document_end(qtbot):
+    viewer = _make_viewer(qtbot, "Hi")
+    viewer.setFocus()
+
+    QTest.keyClick(viewer, Qt.Key_G, Qt.ShiftModifier)
+    assert viewer.textCursor().atEnd()
+
+    selections = viewer.extraSelections()
+    assert len(selections) == 1
+    assert selections[0].cursor.hasSelection()
 
 
 def test_v_enters_visual_mode(qtbot):

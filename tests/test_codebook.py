@@ -40,6 +40,53 @@ def test_rename_code_updates_tree_label(qtbot, tmp_path):
     assert window.code_tree.topLevelItem(0).text(0) == "Frustration"
 
 
+def test_delete_code_reparents_children_in_tree(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.create_project(tmp_path / "project.sqlite")
+
+    grandparent = window.add_code("Emotions")
+    parent = window.add_code("Frustration", parent_id=grandparent.id)
+    child = window.add_code("Anger", parent_id=parent.id)
+
+    window.delete_code(parent.id)
+
+    assert window.code_tree.topLevelItemCount() == 1
+    grandparent_item = window.code_tree.topLevelItem(0)
+    assert grandparent_item.text(0) == "Emotions"
+    assert grandparent_item.childCount() == 1
+    assert grandparent_item.child(0).data(0, Qt.UserRole) == child.id
+
+
+def test_delete_root_code_makes_children_new_roots(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.create_project(tmp_path / "project.sqlite")
+
+    parent = window.add_code("Emotions")
+    child = window.add_code("Frustration", parent_id=parent.id)
+
+    window.delete_code(parent.id)
+
+    assert window.code_tree.topLevelItemCount() == 1
+    assert window.code_tree.topLevelItem(0).data(0, Qt.UserRole) == child.id
+    assert window.code_tree.topLevelItem(0).childCount() == 0
+
+
+def test_delete_code_removes_its_highlight_from_the_viewer(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    _open_project_with_document(window, tmp_path, "Hello frustrating world.")
+
+    code = window.add_code("Frustration")
+    window.apply_segment(code.id, 6, 17)
+    assert len(window.viewer.extraSelections()) == 2  # highlight + block cursor
+
+    window.delete_code(code.id)
+
+    assert len(window.viewer.extraSelections()) == 1  # just the block cursor now
+
+
 def test_segment_list_populates_for_selected_code(qtbot, tmp_path):
     window = MainWindow()
     qtbot.addWidget(window)

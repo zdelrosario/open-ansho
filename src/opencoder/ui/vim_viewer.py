@@ -14,6 +14,10 @@ class VimTextViewer(QPlainTextEdit):
     "WORD" variants: they treat any run of non-blank characters as a
     single unit, so punctuation around or inside a word never stops them
     (unlike lowercase w/b/e, which treat punctuation as its own word).
+
+    G/gg jump to the bottom/top of the whole document. Shift+H/L are
+    viewport-relative instead: H jumps to the start of the first line
+    currently visible in the viewport, L to the start of the last one.
     """
 
     NORMAL = "normal"
@@ -24,8 +28,6 @@ class VimTextViewer(QPlainTextEdit):
     # Keyed by key code (not text) so Shift-based case doesn't matter here;
     # shifted letters (W/B/E, G) are disambiguated via the Shift modifier.
     _MOTION_KEYS = {
-        Qt.Key_H: QTextCursor.Left,
-        Qt.Key_L: QTextCursor.Right,
         Qt.Key_J: QTextCursor.Down,
         Qt.Key_K: QTextCursor.Up,
         Qt.Key_Left: QTextCursor.Left,  # alias, doesn't conflict with code-cycling (Up/Down only)
@@ -91,6 +93,22 @@ class VimTextViewer(QPlainTextEdit):
             return
 
         self._pending_g = False
+
+        if key == Qt.Key_H:
+            if shift:
+                self._jump_to_first_visible_line()
+            else:
+                self._move(QTextCursor.Left)
+            event.accept()
+            return
+
+        if key == Qt.Key_L:
+            if shift:
+                self._jump_to_last_visible_line()
+            else:
+                self._move(QTextCursor.Right)
+            event.accept()
+            return
 
         if key == Qt.Key_E:
             self._move_to_word_end(self._is_big_word_char if shift else self._is_word_char)
@@ -169,6 +187,29 @@ class VimTextViewer(QPlainTextEdit):
         cursor.setPosition(position, move_mode)
         self.setTextCursor(cursor)
 
+    def _visible_line_starts(self) -> list[int]:
+        """Character positions of the first character of each line currently visible in the viewport."""
+        viewport_bottom = self.viewport().rect().bottom()
+        starts = []
+        block = self.firstVisibleBlock()
+        while block.isValid():
+            top = self.blockBoundingGeometry(block).translated(self.contentOffset()).top()
+            if top > viewport_bottom:
+                break
+            starts.append(block.position())
+            block = block.next()
+        return starts
+
+    def _jump_to_first_visible_line(self) -> None:
+        starts = self._visible_line_starts()
+        if starts:
+            self._set_position(starts[0])
+
+    def _jump_to_last_visible_line(self) -> None:
+        starts = self._visible_line_starts()
+        if starts:
+            self._set_position(starts[-1])
+
     def _end_of_token_index(self, is_token_char) -> int | None:
         """String index of the last character of the current/next token.
 
@@ -242,7 +283,13 @@ class VimTextViewer(QPlainTextEdit):
     def _cursor_highlight_selection(self) -> QTextEdit.ExtraSelection:
         block_cursor = QTextCursor(self.textCursor())
         block_cursor.clearSelection()
-        if not block_cursor.atEnd():
+        if block_cursor.atEnd():
+            # No character to highlight ahead of the cursor; fall back to the
+            # character behind it so the block cursor stays visible at the
+            # very end of the document instead of disappearing.
+            if not block_cursor.atStart():
+                block_cursor.movePosition(QTextCursor.PreviousCharacter, QTextCursor.KeepAnchor)
+        else:
             block_cursor.movePosition(QTextCursor.NextCharacter, QTextCursor.KeepAnchor)
 
         fmt = QTextCharFormat()

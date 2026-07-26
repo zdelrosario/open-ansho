@@ -69,6 +69,48 @@ def test_set_code_parent_none_makes_it_top_level(conn):
     assert updated.parent_id is None
 
 
+def test_delete_code_reparents_children_to_grandparent(conn):
+    grandparent = db.create_code(conn, "Emotions")
+    parent = db.create_code(conn, "Frustration", parent_id=grandparent.id)
+    child = db.create_code(conn, "Anger", parent_id=parent.id)
+
+    db.delete_code(conn, parent.id)
+
+    assert db.get_code(conn, parent.id) is None
+    assert db.get_code(conn, child.id).parent_id == grandparent.id
+
+
+def test_delete_code_makes_children_root_when_no_grandparent(conn):
+    parent = db.create_code(conn, "Emotions")
+    child = db.create_code(conn, "Frustration", parent_id=parent.id)
+
+    db.delete_code(conn, parent.id)
+
+    assert db.get_code(conn, parent.id) is None
+    assert db.get_code(conn, child.id).parent_id is None
+
+
+def test_delete_code_removes_its_own_segments(conn):
+    doc = db.create_document(conn, "doc.txt", "Hello world.")
+    code = db.create_code(conn, "Greeting")
+    db.create_segment(conn, doc.id, code.id, 0, 5)
+
+    db.delete_code(conn, code.id)
+
+    assert db.list_segments_for_document(conn, doc.id) == []
+
+
+def test_delete_code_leaves_siblings_and_other_codes_alone(conn):
+    parent = db.create_code(conn, "Emotions")
+    keep_child = db.create_code(conn, "Anger", parent_id=parent.id)
+    other = db.create_code(conn, "Reward")
+
+    db.delete_code(conn, parent.id)
+
+    assert db.get_code(conn, keep_child.id).parent_id is None
+    assert db.get_code(conn, other.id) is not None
+
+
 def test_create_segment_links_document_and_code(conn):
     doc = db.create_document(conn, "interview_01.txt", "Hello world.")
     code = db.create_code(conn, "Greeting")

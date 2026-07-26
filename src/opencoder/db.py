@@ -141,6 +141,22 @@ def set_code_parent(conn: sqlite3.Connection, code_id: int, parent_id: int | Non
     return get_code(conn, code_id)
 
 
+def delete_code(conn: sqlite3.Connection, code_id: int) -> None:
+    """Delete a code, re-parenting its children to its own parent (or to root).
+
+    `codes.parent_id` cascades on delete, so children would otherwise be
+    deleted along with their parent; re-pointing them first avoids that.
+    """
+    code = get_code(conn, code_id)
+    if code is None:
+        return
+    conn.execute(
+        "UPDATE codes SET parent_id = ? WHERE parent_id = ?", (code.parent_id, code_id)
+    )
+    conn.execute("DELETE FROM codes WHERE id = ?", (code_id,))
+    conn.commit()
+
+
 def create_segment(
     conn: sqlite3.Connection,
     document_id: int,

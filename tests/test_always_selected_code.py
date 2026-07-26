@@ -48,6 +48,46 @@ def test_selecting_viewer_text_keeps_an_existing_selection(qtbot, tmp_path):
     assert window.code_tree.currentItem().text(0) == "Reward"
 
 
+def test_selecting_viewer_text_restores_the_last_selected_code(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    _open_project_with_document(window, tmp_path)
+    window.add_code("Frustration")
+    reward = window.add_code("Reward")
+
+    window._select_code(reward.id)
+    _select_viewer_text(window, 6, 17)
+    assert window.code_tree.currentItem().text(0) == "Reward"
+
+    cursor = window.viewer.textCursor()
+    cursor.clearSelection()
+    window.viewer.setTextCursor(cursor)
+    assert window.code_tree.currentItem() is None
+
+    _select_viewer_text(window, 0, 5)  # "Hello", elsewhere in the document
+    assert window.code_tree.currentItem().text(0) == "Reward"
+
+
+def test_last_selected_code_falls_back_after_deletion(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    _open_project_with_document(window, tmp_path)
+    window.add_code("Frustration")
+    reward = window.add_code("Reward")
+
+    window._select_code(reward.id)
+    _select_viewer_text(window, 6, 17)
+    cursor = window.viewer.textCursor()
+    cursor.clearSelection()
+    window.viewer.setTextCursor(cursor)
+    assert window.code_tree.currentItem() is None
+
+    window.delete_code(reward.id)
+
+    _select_viewer_text(window, 6, 17)
+    assert window.code_tree.currentItem().text(0) == "Frustration"
+
+
 def test_clearing_viewer_selection_clears_the_code_selection(qtbot, tmp_path):
     window = MainWindow()
     qtbot.addWidget(window)
@@ -151,6 +191,22 @@ def test_arrow_keys_on_viewer_do_not_collapse_the_text_selection(qtbot, tmp_path
 
     assert window.viewer.textCursor().hasSelection()
     assert window.viewer.textCursor().selectedText() == "frustrating"
+
+
+def test_escape_in_filter_field_returns_focus_to_viewer(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    _open_project_with_document(window, tmp_path)
+
+    window.code_filter_input.setFocus()
+    qtbot.waitUntil(lambda: window.code_filter_input.hasFocus())
+    window.code_filter_input.setText("some filter text")
+
+    QTest.keyClick(window.code_filter_input, Qt.Key_Escape)
+
+    qtbot.waitUntil(lambda: window.viewer.hasFocus())
+    assert window.code_filter_input.text() == "some filter text"  # left untouched
 
 
 def test_arrow_keys_on_viewer_do_nothing_without_a_selection(qtbot, tmp_path):

@@ -1,4 +1,5 @@
 from PySide6.QtCore import Qt
+from PySide6.QtTest import QTest
 
 from opencoder import db
 from opencoder.ui.main_window import MainWindow
@@ -175,3 +176,87 @@ def test_enter_with_no_matches_still_creates_new_code(qtbot, tmp_path):
 
     assert window.code_tree.topLevelItemCount() == 2
     assert window.code_filter_input.text() == ""
+
+
+def test_enter_applying_existing_code_returns_focus_to_viewer(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    window.create_project(tmp_path / "project.sqlite")
+    doc_path = tmp_path / "doc.txt"
+    doc_path.write_text("Hello frustrating world.", encoding="utf-8")
+    window.import_document(doc_path)
+    window.document_list.setCurrentRow(0)
+    window.add_code("Frustration")
+
+    cursor = window.viewer.textCursor()
+    cursor.setPosition(6)
+    cursor.setPosition(17, cursor.MoveMode.KeepAnchor)
+    window.viewer.setTextCursor(cursor)
+
+    window.code_filter_input.setFocus()
+    qtbot.waitUntil(lambda: window.code_filter_input.hasFocus())
+    window.code_filter_input.setText("frus")
+    window.code_filter_input.returnPressed.emit()
+
+    qtbot.waitUntil(lambda: window.viewer.hasFocus())
+
+
+def test_enter_creating_new_code_applies_to_selection_and_returns_focus(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    window.create_project(tmp_path / "project.sqlite")
+    doc_path = tmp_path / "doc.txt"
+    doc_path.write_text("Hello frustrating world.", encoding="utf-8")
+    window.import_document(doc_path)
+    window.document_list.setCurrentRow(0)
+
+    cursor = window.viewer.textCursor()
+    cursor.setPosition(6)
+    cursor.setPosition(17, cursor.MoveMode.KeepAnchor)
+    window.viewer.setTextCursor(cursor)
+
+    window.code_filter_input.setFocus()
+    qtbot.waitUntil(lambda: window.code_filter_input.hasFocus())
+    window.code_filter_input.setText("Frustration")
+    window.code_filter_input.returnPressed.emit()
+
+    segments = db.list_segments_for_document(window.conn, window._current_document_id)
+    assert len(segments) == 1
+    assert segments[0].start_offset == 6
+    assert segments[0].end_offset == 17
+    assert window.code_tree.topLevelItemCount() == 1
+
+    qtbot.waitUntil(lambda: window.viewer.hasFocus())
+
+
+def test_enter_creating_new_code_without_selection_does_not_steal_focus(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    window.create_project(tmp_path / "project.sqlite")
+
+    window.code_filter_input.setFocus()
+    qtbot.waitUntil(lambda: window.code_filter_input.hasFocus())
+    window.code_filter_input.setText("Frustration")
+    window.code_filter_input.returnPressed.emit()
+
+    assert window.code_tree.topLevelItemCount() == 1
+    assert window.code_filter_input.hasFocus()
+
+
+def test_space_selects_all_text_in_code_filter_input(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    window.create_project(tmp_path / "project.sqlite")
+    window.code_filter_input.setText("existing")
+
+    window.viewer.setFocus()
+    qtbot.waitUntil(lambda: window.viewer.hasFocus())
+
+    QTest.keyClick(window.viewer, Qt.Key_Space)
+
+    qtbot.waitUntil(lambda: window.code_filter_input.hasFocus())
+    assert window.code_filter_input.selectedText() == "existing"
