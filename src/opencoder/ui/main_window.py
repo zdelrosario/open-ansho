@@ -7,9 +7,9 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QColor, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
     QFileDialog,
-    QHBoxLayout,
     QInputDialog,
     QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMainWindow,
@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 
 from opencoder import db, reporting
 from opencoder.db import Code
+from opencoder.ui.code_tree import CodeTreeWidget
 from opencoder.ui.report_dialog import CodeFrequencyDialog
 
 PROJECT_FILTER = "OpenCoder Project (*.sqlite)"
@@ -53,6 +54,25 @@ HIGHLIGHT_ALPHA = 120
 SNIPPET_MAX_LENGTH = 60
 
 
+def _apply_filter_to_item(item: QTreeWidgetItem, query: str) -> bool:
+    """Hide items that don't match `query` and have no matching descendant.
+
+    Returns whether `item` (or any descendant) matches, so callers can
+    keep an ancestor visible whenever one of its children matches.
+    """
+    self_match = not query or query in item.text(0).lower()
+    child_match = False
+    for row in range(item.childCount()):
+        if _apply_filter_to_item(item.child(row), query):
+            child_match = True
+
+    visible = self_match or child_match
+    item.setHidden(not visible)
+    if query and child_match:
+        item.setExpanded(True)
+    return visible
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -69,14 +89,19 @@ class MainWindow(QMainWindow):
         self.viewer = QPlainTextEdit()
         self.viewer.setReadOnly(True)
 
-        self.code_tree = QTreeWidget()
+        self.code_tree = CodeTreeWidget()
         self.code_tree.setHeaderHidden(True)
         self.code_tree.currentItemChanged.connect(self._on_code_selected)
         self.code_tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.code_tree.customContextMenuRequested.connect(self._on_code_context_menu)
+        self.code_tree.codeReparented.connect(self._on_code_reparented)
 
-        self.new_code_button = QPushButton("New Code…")
-        self.new_code_button.clicked.connect(self._on_new_code)
+        self._code_items_by_id: dict[int, QTreeWidgetItem] = {}
+
+        self.code_filter_input = QLineEdit()
+        self.code_filter_input.setPlaceholderText("Filter codes, or type a new name and press Enter…")
+        self.code_filter_input.textChanged.connect(self._on_code_filter_changed)
+        self.code_filter_input.returnPressed.connect(self._on_code_filter_return_pressed)
 
         self.apply_code_button = QPushButton("Apply to Selection")
         self.apply_code_button.clicked.connect(self._on_apply_code)
@@ -94,11 +119,9 @@ class MainWindow(QMainWindow):
         tree_layout = QVBoxLayout(tree_container)
         tree_layout.setContentsMargins(0, 0, 0, 0)
         tree_layout.addWidget(QLabel("Codebook"))
+        tree_layout.addWidget(self.code_filter_input)
         tree_layout.addWidget(self.code_tree)
-        button_row = QHBoxLayout()
-        button_row.addWidget(self.new_code_button)
-        button_row.addWidget(self.apply_code_button)
-        tree_layout.addLayout(button_row)
+        tree_layout.addWidget(self.apply_code_button)
         code_splitter.addWidget(tree_container)
 
         segments_container = QWidget()
@@ -206,13 +229,29 @@ class MainWindow(QMainWindow):
     ) -> None:
         self._refresh_segments_for_selected_code()
 
-    def _on_new_code(self) -> None:
+    def _on_code_reparented(self, code_id: int, new_parent_id: int | None) -> None:
         if self.conn is None:
             return
-        name, ok = QInputDialog.getText(self, "New Code", "Code name:")
-        if not ok or not name.strip():
+        try:
+            self.reparent_code(code_id, new_parent_id)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Invalid Move", str(exc))
+            self._refresh_codes()
+
+    def _on_code_filter_changed(self, text: str) -> None:
+        self._apply_code_filter(text)
+
+    def _on_code_filter_return_pressed(self) -> None:
+        if self.conn is None:
             return
-        self.add_code(name.strip())
+        name = self.code_filter_input.text().strip()
+        if not name:
+            return
+        if self._find_code_by_name(name) is not None:
+            return
+        code = self.add_code(name)
+        self.code_filter_input.clear()
+        self._select_code(code.id)
 
     def _on_apply_code(self) -> None:
         if self._current_document_id is None:
@@ -234,20 +273,19 @@ class MainWindow(QMainWindow):
         if self.conn is None:
             return
         item = self.code_tree.itemAt(pos)
+        if item is None:
+            return
 
         menu = QMenu(self)
-        new_top_action = menu.addAction("New Code…")
-        new_child_action = menu.addAction("New Child Code…") if item is not None else None
-        rename_action = menu.addAction("Rename…") if item is not None else None
+        new_child_action = menu.addAction("New Child Code…")
+        rename_action = menu.addAction("Rename…")
 
         chosen = menu.exec(self.code_tree.viewport().mapToGlobal(pos))
         if chosen is None:
             return
-        if chosen is new_top_action:
-            self._on_new_code()
-        elif item is not None and chosen is new_child_action:
+        if chosen is new_child_action:
             self._on_new_child_code(item.data(0, Qt.UserRole))
-        elif item is not None and chosen is rename_action:
+        elif chosen is rename_action:
             self._on_rename_code(item.data(0, Qt.UserRole), item.text(0))
 
     def _on_new_child_code(self, parent_id: int) -> None:
@@ -340,6 +378,28 @@ class MainWindow(QMainWindow):
         self._refresh_codes()
         return code
 
+    def reparent_code(self, code_id: int, parent_id: int | None) -> Code:
+        if self.conn is None:
+            raise RuntimeError("No project open")
+        if parent_id == code_id:
+            raise ValueError("A code cannot be its own parent.")
+        if parent_id is not None and self._is_descendant_of(parent_id, code_id):
+            raise ValueError("Cannot move a code under one of its own descendants.")
+        code = db.set_code_parent(self.conn, code_id, parent_id)
+        self._refresh_codes()
+        return code
+
+    def _is_descendant_of(self, candidate_id: int, ancestor_id: int) -> bool:
+        if self.conn is None:
+            return False
+        codes_by_id = {code.id: code for code in db.list_codes(self.conn)}
+        current = codes_by_id.get(candidate_id)
+        while current is not None and current.parent_id is not None:
+            if current.parent_id == ancestor_id:
+                return True
+            current = codes_by_id.get(current.parent_id)
+        return False
+
     def apply_segment(self, code_id: int, start: int, end: int) -> None:
         if self.conn is None or self._current_document_id is None:
             return
@@ -371,27 +431,28 @@ class MainWindow(QMainWindow):
     def _refresh_codes(self) -> None:
         self.code_tree.clear()
         self.segment_list.clear()
+        self._code_items_by_id = {}
         if self.conn is None:
             return
 
-        items_by_id: dict[int, QTreeWidgetItem] = {}
         codes = db.list_codes(self.conn)
         for code in codes:
             item = QTreeWidgetItem([code.name])
             item.setData(0, Qt.UserRole, code.id)
             if code.color:
                 item.setBackground(0, QColor(code.color))
-            items_by_id[code.id] = item
+            self._code_items_by_id[code.id] = item
 
         for code in codes:
-            item = items_by_id[code.id]
-            parent_item = items_by_id.get(code.parent_id) if code.parent_id else None
+            item = self._code_items_by_id[code.id]
+            parent_item = self._code_items_by_id.get(code.parent_id) if code.parent_id else None
             if parent_item is not None:
                 parent_item.addChild(item)
             else:
                 self.code_tree.addTopLevelItem(item)
 
         self.code_tree.expandAll()
+        self._apply_code_filter(self.code_filter_input.text())
 
     def _refresh_highlights(self) -> None:
         if self.conn is None or self._current_document_id is None:
@@ -442,6 +503,25 @@ class MainWindow(QMainWindow):
                 Qt.UserRole, (segment.document_id, segment.start_offset, segment.end_offset)
             )
             self.segment_list.addItem(list_item)
+
+    def _apply_code_filter(self, text: str) -> None:
+        query = text.strip().lower()
+        for row in range(self.code_tree.topLevelItemCount()):
+            _apply_filter_to_item(self.code_tree.topLevelItem(row), query)
+
+    def _find_code_by_name(self, name: str) -> Code | None:
+        if self.conn is None:
+            return None
+        target = name.strip().lower()
+        for code in db.list_codes(self.conn):
+            if code.name.strip().lower() == target:
+                return code
+        return None
+
+    def _select_code(self, code_id: int) -> None:
+        item = self._code_items_by_id.get(code_id)
+        if item is not None:
+            self.code_tree.setCurrentItem(item)
 
     def _select_document(self, document_id: int) -> None:
         for row in range(self.document_list.count()):

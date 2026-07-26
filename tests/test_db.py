@@ -51,6 +51,24 @@ def test_rename_code(conn):
     assert db.get_code(conn, code.id).name == "Frustration (renamed)"
 
 
+def test_set_code_parent_nests_a_top_level_code(conn):
+    parent = db.create_code(conn, "Emotions")
+    child = db.create_code(conn, "Frustration")
+
+    updated = db.set_code_parent(conn, child.id, parent.id)
+
+    assert updated.parent_id == parent.id
+
+
+def test_set_code_parent_none_makes_it_top_level(conn):
+    parent = db.create_code(conn, "Emotions")
+    child = db.create_code(conn, "Frustration", parent_id=parent.id)
+
+    updated = db.set_code_parent(conn, child.id, None)
+
+    assert updated.parent_id is None
+
+
 def test_create_segment_links_document_and_code(conn):
     doc = db.create_document(conn, "interview_01.txt", "Hello world.")
     code = db.create_code(conn, "Greeting")

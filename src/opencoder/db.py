@@ -135,6 +135,12 @@ def rename_code(conn: sqlite3.Connection, code_id: int, name: str) -> Code:
     return get_code(conn, code_id)
 
 
+def set_code_parent(conn: sqlite3.Connection, code_id: int, parent_id: int | None) -> Code:
+    conn.execute("UPDATE codes SET parent_id = ? WHERE id = ?", (parent_id, code_id))
+    conn.commit()
+    return get_code(conn, code_id)
+
+
 def create_segment(
     conn: sqlite3.Connection,
     document_id: int,
