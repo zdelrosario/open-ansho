@@ -15,7 +15,6 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMenu,
     QMessageBox,
-    QPlainTextEdit,
     QPushButton,
     QSplitter,
     QTextEdit,
@@ -30,6 +29,7 @@ from opencoder.db import Code
 from opencoder.ui.code_filter_input import CodeFilterLineEdit
 from opencoder.ui.code_tree import CodeTreeWidget
 from opencoder.ui.report_dialog import CodeFrequencyDialog
+from opencoder.ui.vim_viewer import VimTextViewer
 
 PROJECT_FILTER = "OpenCoder Project (*.sqlite)"
 TEXT_FILTER = "Text Files (*.txt);;All Files (*)"
@@ -87,9 +87,9 @@ class MainWindow(QMainWindow):
         self.document_list = QListWidget()
         self.document_list.currentItemChanged.connect(self._on_document_selected)
 
-        self.viewer = QPlainTextEdit()
-        self.viewer.setReadOnly(True)
+        self.viewer = VimTextViewer()
         self.viewer.selectionChanged.connect(self._on_viewer_selection_changed)
+        self.viewer.modeChanged.connect(self._on_viewer_mode_changed)
 
         self.code_tree = CodeTreeWidget()
         self.code_tree.setHeaderHidden(True)
@@ -147,6 +147,9 @@ class MainWindow(QMainWindow):
         self._update_actions_enabled()
         self.statusBar().showMessage("No project open")
 
+        self.vim_mode_label = QLabel()
+        self.statusBar().addPermanentWidget(self.vim_mode_label)
+
         QApplication.instance().installEventFilter(self)
 
     def closeEvent(self, event) -> None:
@@ -162,6 +165,21 @@ class MainWindow(QMainWindow):
             elif event.key() in (Qt.Key_Up, Qt.Key_Down):
                 if QApplication.focusWidget() is self.viewer and self.viewer.textCursor().hasSelection():
                     self._cycle_matched_code(-1 if event.key() == Qt.Key_Up else 1)
+                    return True
+            elif event.key() in (Qt.Key_Return, Qt.Key_Enter):
+                if QApplication.focusWidget() is self.viewer:
+                    current = self.code_tree.currentItem()
+                    if current is not None and self._apply_code_to_viewer_selection(
+                        current.data(0, Qt.UserRole)
+                    ):
+                        self.viewer.exit_visual_mode()
+                        return True
+            elif event.key() == Qt.Key_X:
+                if (
+                    QApplication.focusWidget() is self.viewer
+                    and self.viewer.mode == VimTextViewer.NORMAL
+                ):
+                    self._delete_segments_at_cursor()
                     return True
         return super().eventFilter(watched, event)
 
@@ -234,16 +252,20 @@ class MainWindow(QMainWindow):
     def _on_document_selected(
         self, current: QListWidgetItem | None, _previous: QListWidgetItem | None
     ) -> None:
+        self.viewer.exit_visual_mode()
         if current is None or self.conn is None:
             self._current_document_id = None
             self.viewer.clear()
-            self.viewer.setExtraSelections([])
+            self.viewer.set_code_highlights([])
             return
         doc_id = current.data(Qt.UserRole)
         doc = db.get_document(self.conn, doc_id)
         self._current_document_id = doc_id
         self.viewer.setPlainText(doc.content if doc else "")
         self._refresh_highlights()
+
+    def _on_viewer_mode_changed(self, mode: str) -> None:
+        self.vim_mode_label.setText("-- VISUAL --" if mode == VimTextViewer.VISUAL else "")
 
     def _on_code_selected(
         self, _current: QTreeWidgetItem | None, _previous: QTreeWidgetItem | None
@@ -276,10 +298,7 @@ class MainWindow(QMainWindow):
         matches = self._matching_code_items(text)
         if matches:
             code_id = self._current_or_first_match_id(matches)
-            cursor = self.viewer.textCursor()
-            if cursor.hasSelection():
-                self.apply_segment(code_id, cursor.selectionStart(), cursor.selectionEnd())
-            else:
+            if not self._apply_code_to_viewer_selection(code_id):
                 self._select_code(code_id)
             return
 
@@ -441,6 +460,26 @@ class MainWindow(QMainWindow):
         self._refresh_highlights()
         self._refresh_segments_for_selected_code()
 
+    def _apply_code_to_viewer_selection(self, code_id: int) -> bool:
+        cursor = self.viewer.textCursor()
+        if not cursor.hasSelection():
+            return False
+        self.apply_segment(code_id, cursor.selectionStart(), cursor.selectionEnd())
+        return True
+
+    def _delete_segments_at_cursor(self) -> None:
+        if self.conn is None or self._current_document_id is None:
+            return
+        position = self.viewer.textCursor().position()
+        segments = db.list_segments_for_document(self.conn, self._current_document_id)
+        intersecting = [s for s in segments if s.start_offset <= position < s.end_offset]
+        if not intersecting:
+            return
+        for segment in intersecting:
+            db.delete_segment(self.conn, segment.id)
+        self._refresh_highlights()
+        self._refresh_segments_for_selected_code()
+
     def _set_connection(self, conn: sqlite3.Connection, path: Path) -> None:
         if self.conn is not None:
             self.conn.close()
@@ -491,7 +530,7 @@ class MainWindow(QMainWindow):
 
     def _refresh_highlights(self) -> None:
         if self.conn is None or self._current_document_id is None:
-            self.viewer.setExtraSelections([])
+            self.viewer.set_code_highlights([])
             return
         codes_by_id = {code.id: code for code in db.list_codes(self.conn)}
         segments = db.list_segments_for_document(self.conn, self._current_document_id)
@@ -514,7 +553,7 @@ class MainWindow(QMainWindow):
             selection.format = fmt
             selections.append(selection)
 
-        self.viewer.setExtraSelections(selections)
+        self.viewer.set_code_highlights(selections)
 
     def _refresh_segments_for_selected_code(self) -> None:
         self.segment_list.clear()

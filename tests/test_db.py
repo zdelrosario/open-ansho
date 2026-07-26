@@ -115,3 +115,14 @@ def test_list_segments_for_code(conn):
 def test_segment_requires_existing_document_and_code(conn):
     with pytest.raises(sqlite3.IntegrityError):
         db.create_segment(conn, document_id=999, code_id=999, start_offset=0, end_offset=1)
+
+
+def test_delete_segment(conn):
+    doc = db.create_document(conn, "interview_01.txt", "Hello world.")
+    code = db.create_code(conn, "Greeting")
+    segment = db.create_segment(conn, doc.id, code.id, 0, 5)
+
+    db.delete_segment(conn, segment.id)
+
+    assert db.get_segment(conn, segment.id) is None
+    assert db.list_segments_for_document(conn, doc.id) == []

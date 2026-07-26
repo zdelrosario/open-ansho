@@ -185,3 +185,8 @@ def list_segments_for_code(conn: sqlite3.Connection, code_id: int) -> list[Segme
         "SELECT * FROM segments WHERE code_id = ? ORDER BY id", (code_id,)
     ).fetchall()
     return [Segment(**row) for row in rows]
+
+
+def delete_segment(conn: sqlite3.Connection, segment_id: int) -> None:
+    conn.execute("DELETE FROM segments WHERE id = ?", (segment_id,))
+    conn.commit()
