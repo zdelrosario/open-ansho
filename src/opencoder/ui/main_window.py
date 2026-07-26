@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import sqlite3
 from pathlib import Path
 
@@ -61,6 +62,8 @@ CODE_COLOR_PALETTE = [
 HIGHLIGHT_ALPHA = 120
 
 SNIPPET_MAX_LENGTH = 60
+TOOLTIP_MAX_WIDTH_PX = 400
+OTHER_DOCUMENT_TEXT_COLOR = QColor(150, 150, 150)
 
 CODE_SORT_ALPHABETICAL = "alphabetical"
 CODE_SORT_CURRENT_DOCUMENT = "current_document"
@@ -105,6 +108,17 @@ def _apply_filter_to_item(item: QTreeWidgetItem, query: str) -> bool:
     return visible
 
 
+def _segment_tooltip(full_text: str, doc_name: str) -> str:
+    """Rich-text tooltip body: full segment text plus "[doc name]", word-wrapped."""
+    escaped_text = html.escape(full_text)
+    escaped_doc_name = html.escape(doc_name)
+    return (
+        f'<div style="max-width: {TOOLTIP_MAX_WIDTH_PX}px;">'
+        f"{escaped_text} [{escaped_doc_name}]"
+        f"</div>"
+    )
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -124,6 +138,7 @@ class MainWindow(QMainWindow):
         self.viewer = VimTextViewer()
         self.viewer.setObjectName("viewerPane")
         self.viewer.selectionChanged.connect(self._on_viewer_selection_changed)
+        self.viewer.cursorPositionChanged.connect(self._on_viewer_cursor_moved)
         self.viewer.modeChanged.connect(self._on_viewer_mode_changed)
         self.viewer.searchTextChanged.connect(self._on_viewer_search_text_changed)
 
@@ -140,6 +155,7 @@ class MainWindow(QMainWindow):
 
         self._code_items_by_id: dict[int, QTreeWidgetItem] = {}
         self._last_selected_code_id: int | None = None
+        self._segments_panel_code_id: int | None = None
 
         self.code_sort_combo = QComboBox()
         for value, label in CODE_SORT_OPTIONS:
@@ -155,6 +171,9 @@ class MainWindow(QMainWindow):
 
         self.apply_code_button = QPushButton("Apply to Selection")
         self.apply_code_button.clicked.connect(self._on_apply_code)
+
+        self.segment_code_label = QLabel()
+        self.segment_code_label.setMargin(4)
 
         self.segment_list = QListWidget()
         self.segment_list.itemDoubleClicked.connect(self._on_segment_activated)
@@ -183,6 +202,7 @@ class MainWindow(QMainWindow):
         segments_layout = QVBoxLayout(segments_container)
         segments_layout.setContentsMargins(0, 0, 0, 0)
         segments_layout.addWidget(QLabel("Coded Segments"))
+        segments_layout.addWidget(self.segment_code_label)
         segments_layout.addWidget(self.segment_list)
         code_splitter.addWidget(segments_container)
 
@@ -360,6 +380,7 @@ class MainWindow(QMainWindow):
             self.viewer.clear()
             self.viewer.set_code_highlights([])
             self._refresh_codes()
+            self._on_viewer_cursor_moved()
             return
         doc_id = current.data(Qt.UserRole)
         doc = db.get_document(self.conn, doc_id)
@@ -367,6 +388,7 @@ class MainWindow(QMainWindow):
         self.viewer.setPlainText(doc.content if doc else "")
         self._refresh_highlights()
         self._refresh_codes()
+        self._on_viewer_cursor_moved()
 
     def _on_viewer_mode_changed(self, mode: str) -> None:
         if mode == VimTextViewer.VISUAL:
@@ -384,7 +406,7 @@ class MainWindow(QMainWindow):
     ) -> None:
         if current is not None:
             self._last_selected_code_id = current.data(0, Qt.UserRole)
-        self._refresh_segments_for_selected_code()
+        self._show_segments_for_code(current.data(0, Qt.UserRole) if current is not None else None)
 
     def _on_code_filter_escape(self) -> None:
         self.viewer.setFocus()
@@ -631,7 +653,7 @@ class MainWindow(QMainWindow):
         db.create_segment(self.conn, self._current_document_id, code_id, start, end)
         self._refresh_codes()
         self._refresh_highlights()
-        self._refresh_segments_for_selected_code()
+        self._render_segments_panel()
 
     def _apply_code_to_viewer_selection(self, code_id: int) -> bool:
         cursor = self.viewer.textCursor()
@@ -652,7 +674,7 @@ class MainWindow(QMainWindow):
             db.delete_segment(self.conn, segment.id)
         self._refresh_codes()
         self._refresh_highlights()
-        self._refresh_segments_for_selected_code()
+        self._render_segments_panel()
 
     def _delete_segments_in_viewer_selection(self) -> None:
         if self.conn is None or self._current_document_id is None:
@@ -669,7 +691,7 @@ class MainWindow(QMainWindow):
             db.delete_segment(self.conn, segment.id)
         self._refresh_codes()
         self._refresh_highlights()
-        self._refresh_segments_for_selected_code()
+        self._render_segments_panel()
 
     def _jump_to_adjacent_segment(self, direction: int) -> None:
         segment = self._adjacent_segment(direction)
@@ -839,27 +861,64 @@ class MainWindow(QMainWindow):
 
         self.viewer.set_code_highlights(selections)
 
-    def _refresh_segments_for_selected_code(self) -> None:
-        self.segment_list.clear()
-        if self.conn is None:
-            return
+    def _segment_at_viewer_cursor(self) -> db.Segment | None:
+        if self.conn is None or self._current_document_id is None:
+            return None
+        position = self.viewer.textCursor().position()
+        for segment in db.list_segments_for_document(self.conn, self._current_document_id):
+            if segment.start_offset <= position < segment.end_offset:
+                return segment
+        return None
+
+    def _on_viewer_cursor_moved(self) -> None:
+        if QApplication.focusWidget() is self.viewer:
+            segment = self._segment_at_viewer_cursor()
+            if segment is not None:
+                self._show_segments_for_code(segment.code_id)
+                return
         item = self.code_tree.currentItem()
-        if item is None:
+        self._show_segments_for_code(item.data(0, Qt.UserRole) if item is not None else None)
+
+    def _show_segments_for_code(self, code_id: int | None) -> None:
+        self._segments_panel_code_id = code_id
+        self._render_segments_panel()
+
+    def _render_segments_panel(self) -> None:
+        self.segment_list.clear()
+        code_id = self._segments_panel_code_id
+        code = None
+        if self.conn is not None and code_id is not None:
+            code = next((c for c in db.list_codes(self.conn) if c.id == code_id), None)
+
+        if code is None:
+            self.segment_code_label.clear()
+            self.segment_code_label.setStyleSheet("")
             return
-        code_id = item.data(0, Qt.UserRole)
+
+        self.segment_code_label.setText(code.name)
+        self.segment_code_label.setStyleSheet(
+            f"background-color: {code.color}; border-radius: 3px;" if code.color else ""
+        )
 
         documents_by_id = {doc.id: doc for doc in db.list_documents(self.conn)}
-        for segment in db.list_segments_for_code(self.conn, code_id):
+        segments = db.list_segments_for_code(self.conn, code_id)
+        segments.sort(key=lambda s: s.document_id != self._current_document_id)
+
+        for segment in segments:
             doc = documents_by_id.get(segment.document_id)
             doc_name = doc.name if doc else "?"
-            snippet = doc.content[segment.start_offset : segment.end_offset] if doc else ""
+            full_text = doc.content[segment.start_offset : segment.end_offset] if doc else ""
+            snippet = full_text
             if len(snippet) > SNIPPET_MAX_LENGTH:
                 snippet = snippet[:SNIPPET_MAX_LENGTH] + "…"
 
-            list_item = QListWidgetItem(f"{doc_name}: “{snippet}”")
+            list_item = QListWidgetItem(f"“{snippet}” [{doc_name}]")
             list_item.setData(
                 Qt.UserRole, (segment.document_id, segment.start_offset, segment.end_offset)
             )
+            list_item.setToolTip(_segment_tooltip(full_text, doc_name))
+            if segment.document_id != self._current_document_id:
+                list_item.setForeground(OTHER_DOCUMENT_TEXT_COLOR)
             self.segment_list.addItem(list_item)
 
     def _apply_code_filter(self, text: str) -> None:
