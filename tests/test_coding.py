@@ -20,8 +20,8 @@ def test_add_code_appears_in_list_with_color(qtbot, tmp_path):
     code = window.add_code("Frustration")
 
     assert code.color == CODE_COLOR_PALETTE[0]
-    assert window.code_list.count() == 1
-    assert window.code_list.item(0).text() == "Frustration"
+    assert window.code_tree.topLevelItemCount() == 1
+    assert window.code_tree.topLevelItem(0).text(0) == "Frustration"
 
 
 def test_add_multiple_codes_cycles_palette(qtbot, tmp_path):
@@ -81,7 +81,7 @@ def test_apply_code_button_noop_without_selection(qtbot, tmp_path, monkeypatch):
     qtbot.addWidget(window)
     _open_project_with_document(window, tmp_path)
     window.add_code("Frustration")
-    window.code_list.setCurrentRow(0)
+    window.code_tree.setCurrentItem(window.code_tree.topLevelItem(0))
 
     shown = []
     monkeypatch.setattr(

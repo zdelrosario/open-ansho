@@ -9,14 +9,18 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QInputDialog,
+    QLabel,
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QSplitter,
     QTextEdit,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -40,6 +44,8 @@ CODE_COLOR_PALETTE = [
 
 HIGHLIGHT_ALPHA = 120
 
+SNIPPET_MAX_LENGTH = 60
+
 
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
@@ -49,7 +55,7 @@ class MainWindow(QMainWindow):
         self._current_document_id: int | None = None
 
         self.setWindowTitle("OpenCoder")
-        self.resize(1100, 650)
+        self.resize(1150, 650)
 
         self.document_list = QListWidget()
         self.document_list.currentItemChanged.connect(self._on_document_selected)
@@ -57,7 +63,11 @@ class MainWindow(QMainWindow):
         self.viewer = QPlainTextEdit()
         self.viewer.setReadOnly(True)
 
-        self.code_list = QListWidget()
+        self.code_tree = QTreeWidget()
+        self.code_tree.setHeaderHidden(True)
+        self.code_tree.currentItemChanged.connect(self._on_code_selected)
+        self.code_tree.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.code_tree.customContextMenuRequested.connect(self._on_code_context_menu)
 
         self.new_code_button = QPushButton("New Code…")
         self.new_code_button.clicked.connect(self._on_new_code)
@@ -65,13 +75,34 @@ class MainWindow(QMainWindow):
         self.apply_code_button = QPushButton("Apply to Selection")
         self.apply_code_button.clicked.connect(self._on_apply_code)
 
+        self.segment_list = QListWidget()
+        self.segment_list.itemDoubleClicked.connect(self._on_segment_activated)
+
         code_panel = QWidget()
         code_layout = QVBoxLayout(code_panel)
-        code_layout.addWidget(self.code_list)
+        code_layout.setContentsMargins(0, 0, 0, 0)
+
+        code_splitter = QSplitter(Qt.Vertical)
+
+        tree_container = QWidget()
+        tree_layout = QVBoxLayout(tree_container)
+        tree_layout.setContentsMargins(0, 0, 0, 0)
+        tree_layout.addWidget(QLabel("Codebook"))
+        tree_layout.addWidget(self.code_tree)
         button_row = QHBoxLayout()
         button_row.addWidget(self.new_code_button)
         button_row.addWidget(self.apply_code_button)
-        code_layout.addLayout(button_row)
+        tree_layout.addLayout(button_row)
+        code_splitter.addWidget(tree_container)
+
+        segments_container = QWidget()
+        segments_layout = QVBoxLayout(segments_container)
+        segments_layout.setContentsMargins(0, 0, 0, 0)
+        segments_layout.addWidget(QLabel("Coded Segments"))
+        segments_layout.addWidget(self.segment_list)
+        code_splitter.addWidget(segments_container)
+
+        code_layout.addWidget(code_splitter)
 
         splitter = QSplitter()
         splitter.addWidget(self.document_list)
@@ -143,6 +174,11 @@ class MainWindow(QMainWindow):
         self.viewer.setPlainText(doc.content if doc else "")
         self._refresh_highlights()
 
+    def _on_code_selected(
+        self, _current: QTreeWidgetItem | None, _previous: QTreeWidgetItem | None
+    ) -> None:
+        self._refresh_segments_for_selected_code()
+
     def _on_new_code(self) -> None:
         if self.conn is None:
             return
@@ -159,11 +195,54 @@ class MainWindow(QMainWindow):
         if not cursor.hasSelection():
             QMessageBox.information(self, "No Selection", "Select some text in the document first.")
             return
-        code_item = self.code_list.currentItem()
+        code_item = self.code_tree.currentItem()
         if code_item is None:
             QMessageBox.information(self, "No Code Selected", "Select a code to apply first.")
             return
-        self.apply_segment(code_item.data(Qt.UserRole), cursor.selectionStart(), cursor.selectionEnd())
+        self.apply_segment(
+            code_item.data(0, Qt.UserRole), cursor.selectionStart(), cursor.selectionEnd()
+        )
+
+    def _on_code_context_menu(self, pos) -> None:
+        if self.conn is None:
+            return
+        item = self.code_tree.itemAt(pos)
+
+        menu = QMenu(self)
+        new_top_action = menu.addAction("New Code…")
+        new_child_action = menu.addAction("New Child Code…") if item is not None else None
+        rename_action = menu.addAction("Rename…") if item is not None else None
+
+        chosen = menu.exec(self.code_tree.viewport().mapToGlobal(pos))
+        if chosen is None:
+            return
+        if chosen is new_top_action:
+            self._on_new_code()
+        elif item is not None and chosen is new_child_action:
+            self._on_new_child_code(item.data(0, Qt.UserRole))
+        elif item is not None and chosen is rename_action:
+            self._on_rename_code(item.data(0, Qt.UserRole), item.text(0))
+
+    def _on_new_child_code(self, parent_id: int) -> None:
+        name, ok = QInputDialog.getText(self, "New Child Code", "Code name:")
+        if not ok or not name.strip():
+            return
+        self.add_code(name.strip(), parent_id=parent_id)
+
+    def _on_rename_code(self, code_id: int, current_name: str) -> None:
+        name, ok = QInputDialog.getText(self, "Rename Code", "Code name:", text=current_name)
+        if not ok or not name.strip():
+            return
+        self.rename_code(code_id, name.strip())
+
+    def _on_segment_activated(self, item: QListWidgetItem) -> None:
+        document_id, start, end = item.data(Qt.UserRole)
+        self._select_document(document_id)
+        cursor = self.viewer.textCursor()
+        cursor.setPosition(start)
+        cursor.setPosition(end, QTextCursor.KeepAnchor)
+        self.viewer.setTextCursor(cursor)
+        self.viewer.ensureCursorVisible()
 
     # -- Testable logic, independent of QFileDialog / QMessageBox ---------
 
@@ -189,12 +268,19 @@ class MainWindow(QMainWindow):
         self._refresh_documents()
         self._select_document(doc.id)
 
-    def add_code(self, name: str, color: str | None = None) -> Code:
+    def add_code(self, name: str, parent_id: int | None = None, color: str | None = None) -> Code:
         if self.conn is None:
             raise RuntimeError("No project open")
         if color is None:
             color = self._next_color()
-        code = db.create_code(self.conn, name, color=color)
+        code = db.create_code(self.conn, name, parent_id=parent_id, color=color)
+        self._refresh_codes()
+        return code
+
+    def rename_code(self, code_id: int, name: str) -> Code:
+        if self.conn is None:
+            raise RuntimeError("No project open")
+        code = db.rename_code(self.conn, code_id, name)
         self._refresh_codes()
         return code
 
@@ -203,6 +289,7 @@ class MainWindow(QMainWindow):
             return
         db.create_segment(self.conn, self._current_document_id, code_id, start, end)
         self._refresh_highlights()
+        self._refresh_segments_for_selected_code()
 
     def _set_connection(self, conn: sqlite3.Connection, path: Path) -> None:
         if self.conn is not None:
@@ -226,15 +313,29 @@ class MainWindow(QMainWindow):
             self.document_list.addItem(item)
 
     def _refresh_codes(self) -> None:
-        self.code_list.clear()
+        self.code_tree.clear()
+        self.segment_list.clear()
         if self.conn is None:
             return
-        for code in db.list_codes(self.conn):
-            item = QListWidgetItem(code.name)
-            item.setData(Qt.UserRole, code.id)
+
+        items_by_id: dict[int, QTreeWidgetItem] = {}
+        codes = db.list_codes(self.conn)
+        for code in codes:
+            item = QTreeWidgetItem([code.name])
+            item.setData(0, Qt.UserRole, code.id)
             if code.color:
-                item.setBackground(QColor(code.color))
-            self.code_list.addItem(item)
+                item.setBackground(0, QColor(code.color))
+            items_by_id[code.id] = item
+
+        for code in codes:
+            item = items_by_id[code.id]
+            parent_item = items_by_id.get(code.parent_id) if code.parent_id else None
+            if parent_item is not None:
+                parent_item.addChild(item)
+            else:
+                self.code_tree.addTopLevelItem(item)
+
+        self.code_tree.expandAll()
 
     def _refresh_highlights(self) -> None:
         if self.conn is None or self._current_document_id is None:
@@ -262,6 +363,29 @@ class MainWindow(QMainWindow):
             selections.append(selection)
 
         self.viewer.setExtraSelections(selections)
+
+    def _refresh_segments_for_selected_code(self) -> None:
+        self.segment_list.clear()
+        if self.conn is None:
+            return
+        item = self.code_tree.currentItem()
+        if item is None:
+            return
+        code_id = item.data(0, Qt.UserRole)
+
+        documents_by_id = {doc.id: doc for doc in db.list_documents(self.conn)}
+        for segment in db.list_segments_for_code(self.conn, code_id):
+            doc = documents_by_id.get(segment.document_id)
+            doc_name = doc.name if doc else "?"
+            snippet = doc.content[segment.start_offset : segment.end_offset] if doc else ""
+            if len(snippet) > SNIPPET_MAX_LENGTH:
+                snippet = snippet[:SNIPPET_MAX_LENGTH] + "…"
+
+            list_item = QListWidgetItem(f"{doc_name}: “{snippet}”")
+            list_item.setData(
+                Qt.UserRole, (segment.document_id, segment.start_offset, segment.end_offset)
+            )
+            self.segment_list.addItem(list_item)
 
     def _select_document(self, document_id: int) -> None:
         for row in range(self.document_list.count()):

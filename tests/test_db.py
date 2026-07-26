@@ -41,6 +41,16 @@ def test_create_nested_codes(conn):
     assert {c.id for c in codes} == {parent.id, child.id}
 
 
+def test_rename_code(conn):
+    code = db.create_code(conn, "Frustration")
+
+    renamed = db.rename_code(conn, code.id, "Frustration (renamed)")
+
+    assert renamed.id == code.id
+    assert renamed.name == "Frustration (renamed)"
+    assert db.get_code(conn, code.id).name == "Frustration (renamed)"
+
+
 def test_create_segment_links_document_and_code(conn):
     doc = db.create_document(conn, "interview_01.txt", "Hello world.")
     code = db.create_code(conn, "Greeting")

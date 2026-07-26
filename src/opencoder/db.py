@@ -129,6 +129,12 @@ def list_codes(conn: sqlite3.Connection) -> list[Code]:
     return [Code(**row) for row in rows]
 
 
+def rename_code(conn: sqlite3.Connection, code_id: int, name: str) -> Code:
+    conn.execute("UPDATE codes SET name = ? WHERE id = ?", (name, code_id))
+    conn.commit()
+    return get_code(conn, code_id)
+
+
 def create_segment(
     conn: sqlite3.Connection,
     document_id: int,
