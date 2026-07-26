@@ -31,6 +31,7 @@ from opencoder.db import Code
 from opencoder.ui.code_filter_input import CodeFilterLineEdit
 from opencoder.ui.code_tree import CodeTreeWidget
 from opencoder.ui.report_dialog import CodeFrequencyDialog
+from opencoder.ui.shortcuts_dialog import ShortcutsDialog
 from opencoder.ui.vim_viewer import VimTextViewer
 
 PROJECT_FILTER = "OpenCoder Project (*.sqlite)"
@@ -269,6 +270,10 @@ class MainWindow(QMainWindow):
             elif event.key() == Qt.Key_P:
                 if QApplication.focusWidget() is self.viewer and self.viewer.mode == VimTextViewer.NORMAL:
                     self._jump_to_adjacent_segment(-1)
+                    return True
+            elif event.key() == Qt.Key_Question:
+                if not viewer_searching and QApplication.focusWidget() is self.viewer:
+                    self._on_show_shortcuts()
                     return True
         return super().eventFilter(watched, event)
 
@@ -527,6 +532,10 @@ class MainWindow(QMainWindow):
             return
         rows = reporting.code_frequency(self.conn)
         dialog = CodeFrequencyDialog(rows, self)
+        dialog.exec()
+
+    def _on_show_shortcuts(self) -> None:
+        dialog = ShortcutsDialog(self)
         dialog.exec()
 
     # -- Testable logic, independent of QFileDialog / QMessageBox ---------
