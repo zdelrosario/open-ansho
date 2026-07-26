@@ -168,3 +168,34 @@ def test_delete_segment(conn):
 
     assert db.get_segment(conn, segment.id) is None
     assert db.list_segments_for_document(conn, doc.id) == []
+
+
+def test_count_segments_by_code_across_all_documents(conn):
+    doc_a = db.create_document(conn, "a.txt", "Hello world.")
+    doc_b = db.create_document(conn, "b.txt", "Hello again.")
+    code_a = db.create_code(conn, "Greeting")
+    code_b = db.create_code(conn, "Other")
+
+    db.create_segment(conn, doc_a.id, code_a.id, 0, 5)
+    db.create_segment(conn, doc_b.id, code_a.id, 0, 5)
+    db.create_segment(conn, doc_a.id, code_b.id, 6, 11)
+
+    counts = db.count_segments_by_code(conn)
+    assert counts == {code_a.id: 2, code_b.id: 1}
+
+
+def test_count_segments_by_code_for_one_document(conn):
+    doc_a = db.create_document(conn, "a.txt", "Hello world.")
+    doc_b = db.create_document(conn, "b.txt", "Hello again.")
+    code = db.create_code(conn, "Greeting")
+
+    db.create_segment(conn, doc_a.id, code.id, 0, 5)
+    db.create_segment(conn, doc_b.id, code.id, 0, 5)
+
+    assert db.count_segments_by_code(conn, doc_a.id) == {code.id: 1}
+
+
+def test_count_segments_by_code_omits_uncoded_codes(conn):
+    code = db.create_code(conn, "Unused")
+
+    assert db.count_segments_by_code(conn) == {}

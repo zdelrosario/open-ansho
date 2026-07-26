@@ -7,7 +7,9 @@ from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QAction, QColor, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
+    QComboBox,
     QFileDialog,
+    QHeaderView,
     QInputDialog,
     QLabel,
     QListWidget,
@@ -54,6 +56,16 @@ HIGHLIGHT_ALPHA = 120
 
 SNIPPET_MAX_LENGTH = 60
 
+CODE_SORT_ALPHABETICAL = "alphabetical"
+CODE_SORT_CURRENT_DOCUMENT = "current_document"
+CODE_SORT_ALL_DOCUMENTS = "all_documents"
+
+CODE_SORT_OPTIONS = [
+    (CODE_SORT_ALPHABETICAL, "Alphabetical"),
+    (CODE_SORT_CURRENT_DOCUMENT, "Segments in Current Document"),
+    (CODE_SORT_ALL_DOCUMENTS, "Segments in All Documents"),
+]
+
 PANE_FOCUS_STYLE = """
 QListWidget#documentPane, QPlainTextEdit#viewerPane,
 QWidget#codebookPane, QWidget#segmentsPane {
@@ -93,6 +105,7 @@ class MainWindow(QMainWindow):
         self.conn: sqlite3.Connection | None = None
         self.project_path: Path | None = None
         self._current_document_id: int | None = None
+        self._code_sort_mode: str = CODE_SORT_ALPHABETICAL
 
         self.setWindowTitle("OpenCoder")
         self.resize(1150, 650)
@@ -108,6 +121,10 @@ class MainWindow(QMainWindow):
 
         self.code_tree = CodeTreeWidget()
         self.code_tree.setHeaderHidden(True)
+        self.code_tree.setColumnCount(2)
+        self.code_tree.header().setStretchLastSection(False)
+        self.code_tree.header().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.code_tree.header().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self.code_tree.currentItemChanged.connect(self._on_code_selected)
         self.code_tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.code_tree.customContextMenuRequested.connect(self._on_code_context_menu)
@@ -115,6 +132,11 @@ class MainWindow(QMainWindow):
 
         self._code_items_by_id: dict[int, QTreeWidgetItem] = {}
         self._last_selected_code_id: int | None = None
+
+        self.code_sort_combo = QComboBox()
+        for value, label in CODE_SORT_OPTIONS:
+            self.code_sort_combo.addItem(label, value)
+        self.code_sort_combo.currentIndexChanged.connect(self._on_code_sort_changed)
 
         self.code_filter_input = CodeFilterLineEdit()
         self.code_filter_input.setPlaceholderText("Filter codes, or type a new name and press Enter…")
@@ -141,6 +163,7 @@ class MainWindow(QMainWindow):
         tree_layout = QVBoxLayout(tree_container)
         tree_layout.setContentsMargins(0, 0, 0, 0)
         tree_layout.addWidget(QLabel("Codebook"))
+        tree_layout.addWidget(self.code_sort_combo)
         tree_layout.addWidget(self.code_filter_input)
         tree_layout.addWidget(self.code_tree)
         tree_layout.addWidget(self.apply_code_button)
@@ -293,12 +316,14 @@ class MainWindow(QMainWindow):
             self._current_document_id = None
             self.viewer.clear()
             self.viewer.set_code_highlights([])
+            self._refresh_codes()
             return
         doc_id = current.data(Qt.UserRole)
         doc = db.get_document(self.conn, doc_id)
         self._current_document_id = doc_id
         self.viewer.setPlainText(doc.content if doc else "")
         self._refresh_highlights()
+        self._refresh_codes()
 
     def _on_viewer_mode_changed(self, mode: str) -> None:
         self.vim_mode_label.setText("-- VISUAL --" if mode == VimTextViewer.VISUAL else "")
@@ -312,6 +337,10 @@ class MainWindow(QMainWindow):
 
     def _on_code_filter_escape(self) -> None:
         self.viewer.setFocus()
+
+    def _on_code_sort_changed(self, index: int) -> None:
+        self._code_sort_mode = self.code_sort_combo.itemData(index)
+        self._refresh_codes()
 
     def _on_code_reparented(self, code_id: int, new_parent_id: int | None) -> None:
         if self.conn is None:
@@ -529,6 +558,7 @@ class MainWindow(QMainWindow):
         if self.conn is None or self._current_document_id is None:
             return
         db.create_segment(self.conn, self._current_document_id, code_id, start, end)
+        self._refresh_codes()
         self._refresh_highlights()
         self._refresh_segments_for_selected_code()
 
@@ -549,6 +579,7 @@ class MainWindow(QMainWindow):
             return
         for segment in intersecting:
             db.delete_segment(self.conn, segment.id)
+        self._refresh_codes()
         self._refresh_highlights()
         self._refresh_segments_for_selected_code()
 
@@ -565,6 +596,7 @@ class MainWindow(QMainWindow):
             return
         for segment in intersecting:
             db.delete_segment(self.conn, segment.id)
+        self._refresh_codes()
         self._refresh_highlights()
         self._refresh_segments_for_selected_code()
 
@@ -589,7 +621,19 @@ class MainWindow(QMainWindow):
             item.setData(Qt.UserRole, doc.id)
             self.document_list.addItem(item)
 
+    def _code_sort_key(self, current_doc_counts: dict[int, int], total_counts: dict[int, int]):
+        if self._code_sort_mode == CODE_SORT_CURRENT_DOCUMENT:
+            return lambda code: (-current_doc_counts.get(code.id, 0), code.name.lower())
+        if self._code_sort_mode == CODE_SORT_ALL_DOCUMENTS:
+            return lambda code: (-total_counts.get(code.id, 0), code.name.lower())
+        return lambda code: code.name.lower()
+
     def _refresh_codes(self) -> None:
+        previous_current = self.code_tree.currentItem()
+        previous_code_id = (
+            previous_current.data(0, Qt.UserRole) if previous_current is not None else None
+        )
+
         self.code_tree.clear()
         self.segment_list.clear()
         self._code_items_by_id = {}
@@ -597,22 +641,43 @@ class MainWindow(QMainWindow):
             return
 
         codes = db.list_codes(self.conn)
+        children_by_parent: dict[int | None, list[Code]] = {}
         for code in codes:
-            item = QTreeWidgetItem([code.name])
-            item.setData(0, Qt.UserRole, code.id)
-            if code.color:
-                item.setBackground(0, QColor(code.color))
-            self._code_items_by_id[code.id] = item
+            children_by_parent.setdefault(code.parent_id, []).append(code)
 
-        for code in codes:
-            item = self._code_items_by_id[code.id]
-            parent_item = self._code_items_by_id.get(code.parent_id) if code.parent_id else None
-            if parent_item is not None:
-                parent_item.addChild(item)
-            else:
-                self.code_tree.addTopLevelItem(item)
+        current_doc_counts = (
+            db.count_segments_by_code(self.conn, self._current_document_id)
+            if self._current_document_id is not None
+            else {}
+        )
+        total_counts = db.count_segments_by_code(self.conn)
+
+        sort_key = self._code_sort_key(current_doc_counts, total_counts)
+        for children in children_by_parent.values():
+            children.sort(key=sort_key)
+
+        def add_children(parent_id: int | None, parent_item: QTreeWidgetItem | None) -> None:
+            for code in children_by_parent.get(parent_id, []):
+                count_label = f"{current_doc_counts.get(code.id, 0)}/{total_counts.get(code.id, 0)}"
+                item = QTreeWidgetItem([code.name, count_label])
+                item.setData(0, Qt.UserRole, code.id)
+                item.setTextAlignment(1, Qt.AlignRight | Qt.AlignVCenter)
+                if code.color:
+                    item.setBackground(0, QColor(code.color))
+                self._code_items_by_id[code.id] = item
+                if parent_item is not None:
+                    parent_item.addChild(item)
+                else:
+                    self.code_tree.addTopLevelItem(item)
+                add_children(code.id, item)
+
+        add_children(None, None)
 
         self.code_tree.expandAll()
+        if previous_code_id is not None:
+            restored = self._code_items_by_id.get(previous_code_id)
+            if restored is not None:
+                self.code_tree.setCurrentItem(restored)
         self._apply_code_filter(self.code_filter_input.text())
         self._sync_matched_code_selection()
 

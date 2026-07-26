@@ -203,6 +203,26 @@ def list_segments_for_code(conn: sqlite3.Connection, code_id: int) -> list[Segme
     return [Segment(**row) for row in rows]
 
 
+def count_segments_by_code(
+    conn: sqlite3.Connection, document_id: int | None = None
+) -> dict[int, int]:
+    """Map code_id -> number of segments coded with it.
+
+    Codes with no segments are omitted, so callers should default to 0.
+    """
+    if document_id is None:
+        rows = conn.execute(
+            "SELECT code_id, COUNT(*) AS count FROM segments GROUP BY code_id"
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT code_id, COUNT(*) AS count FROM segments WHERE document_id = ? "
+            "GROUP BY code_id",
+            (document_id,),
+        ).fetchall()
+    return {row["code_id"]: row["count"] for row in rows}
+
+
 def delete_segment(conn: sqlite3.Connection, segment_id: int) -> None:
     conn.execute("DELETE FROM segments WHERE id = ?", (segment_id,))
     conn.commit()
