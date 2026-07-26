@@ -3,13 +3,13 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QAction, QColor, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
+    QApplication,
     QFileDialog,
     QInputDialog,
     QLabel,
-    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMainWindow,
@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 
 from opencoder import db, reporting
 from opencoder.db import Code
+from opencoder.ui.code_filter_input import CodeFilterLineEdit
 from opencoder.ui.code_tree import CodeTreeWidget
 from opencoder.ui.report_dialog import CodeFrequencyDialog
 
@@ -88,6 +89,7 @@ class MainWindow(QMainWindow):
 
         self.viewer = QPlainTextEdit()
         self.viewer.setReadOnly(True)
+        self.viewer.selectionChanged.connect(self._on_viewer_selection_changed)
 
         self.code_tree = CodeTreeWidget()
         self.code_tree.setHeaderHidden(True)
@@ -98,10 +100,11 @@ class MainWindow(QMainWindow):
 
         self._code_items_by_id: dict[int, QTreeWidgetItem] = {}
 
-        self.code_filter_input = QLineEdit()
+        self.code_filter_input = CodeFilterLineEdit()
         self.code_filter_input.setPlaceholderText("Filter codes, or type a new name and press Enter…")
         self.code_filter_input.textChanged.connect(self._on_code_filter_changed)
         self.code_filter_input.returnPressed.connect(self._on_code_filter_return_pressed)
+        self.code_filter_input.cyclePressed.connect(self._on_code_filter_cycle)
 
         self.apply_code_button = QPushButton("Apply to Selection")
         self.apply_code_button.clicked.connect(self._on_apply_code)
@@ -143,6 +146,24 @@ class MainWindow(QMainWindow):
         self._build_menu()
         self._update_actions_enabled()
         self.statusBar().showMessage("No project open")
+
+        QApplication.instance().installEventFilter(self)
+
+    def closeEvent(self, event) -> None:
+        QApplication.instance().removeEventFilter(self)
+        super().closeEvent(event)
+
+    def eventFilter(self, watched, event) -> bool:
+        if event.type() == QEvent.KeyPress:
+            if event.key() == Qt.Key_Space:
+                if QApplication.focusWidget() is not self.code_filter_input:
+                    self.code_filter_input.setFocus()
+                    return True
+            elif event.key() in (Qt.Key_Up, Qt.Key_Down):
+                if QApplication.focusWidget() is self.viewer and self.viewer.textCursor().hasSelection():
+                    self._cycle_matched_code(-1 if event.key() == Qt.Key_Up else 1)
+                    return True
+        return super().eventFilter(watched, event)
 
     def _build_menu(self) -> None:
         file_menu = self.menuBar().addMenu("&File")
@@ -240,16 +261,29 @@ class MainWindow(QMainWindow):
 
     def _on_code_filter_changed(self, text: str) -> None:
         self._apply_code_filter(text)
+        self._sync_matched_code_selection()
+
+    def _on_code_filter_cycle(self, direction: int) -> None:
+        self._cycle_matched_code(direction)
 
     def _on_code_filter_return_pressed(self) -> None:
         if self.conn is None:
             return
-        name = self.code_filter_input.text().strip()
-        if not name:
+        text = self.code_filter_input.text().strip()
+        if not text:
             return
-        if self._find_code_by_name(name) is not None:
+
+        matches = self._matching_code_items(text)
+        if matches:
+            code_id = self._current_or_first_match_id(matches)
+            cursor = self.viewer.textCursor()
+            if cursor.hasSelection():
+                self.apply_segment(code_id, cursor.selectionStart(), cursor.selectionEnd())
+            else:
+                self._select_code(code_id)
             return
-        code = self.add_code(name)
+
+        code = self.add_code(text)
         self.code_filter_input.clear()
         self._select_code(code.id)
 
@@ -453,6 +487,7 @@ class MainWindow(QMainWindow):
 
         self.code_tree.expandAll()
         self._apply_code_filter(self.code_filter_input.text())
+        self._sync_matched_code_selection()
 
     def _refresh_highlights(self) -> None:
         if self.conn is None or self._current_document_id is None:
@@ -509,14 +544,62 @@ class MainWindow(QMainWindow):
         for row in range(self.code_tree.topLevelItemCount()):
             _apply_filter_to_item(self.code_tree.topLevelItem(row), query)
 
-    def _find_code_by_name(self, name: str) -> Code | None:
-        if self.conn is None:
-            return None
-        target = name.strip().lower()
-        for code in db.list_codes(self.conn):
-            if code.name.strip().lower() == target:
-                return code
-        return None
+    def _matching_code_items(self, text: str) -> list[QTreeWidgetItem]:
+        """Codes matching `text`; an empty/blank query matches every code."""
+        query = text.strip().lower()
+
+        matches: list[QTreeWidgetItem] = []
+
+        def walk(item: QTreeWidgetItem) -> None:
+            if not query or query in item.text(0).lower():
+                matches.append(item)
+            for row in range(item.childCount()):
+                walk(item.child(row))
+
+        for row in range(self.code_tree.topLevelItemCount()):
+            walk(self.code_tree.topLevelItem(row))
+        return matches
+
+    def _current_or_first_match_id(self, matches: list[QTreeWidgetItem]) -> int:
+        current = self.code_tree.currentItem()
+        if current in matches:
+            return current.data(0, Qt.UserRole)
+        return matches[0].data(0, Qt.UserRole)
+
+    def _sync_matched_code_selection(self) -> None:
+        text = self.code_filter_input.text().strip()
+        if not text:
+            return
+        matches = self._matching_code_items(text)
+        if not matches:
+            self.code_tree.setCurrentItem(None)
+            return
+        current = self.code_tree.currentItem()
+        if current in matches:
+            return
+        self.code_tree.setCurrentItem(matches[0])
+
+    def _cycle_matched_code(self, direction: int) -> None:
+        matches = self._matching_code_items(self.code_filter_input.text())
+        if not matches:
+            return
+        current = self.code_tree.currentItem()
+        index = (matches.index(current) + direction) % len(matches) if current in matches else 0
+        self.code_tree.setCurrentItem(matches[index])
+
+    def _ensure_code_selected(self) -> None:
+        """Guarantee some code is selected, without disturbing an existing selection."""
+        if self.code_tree.currentItem() is not None:
+            return
+        matches = self._matching_code_items(self.code_filter_input.text())
+        if matches:
+            self.code_tree.setCurrentItem(matches[0])
+
+    def _on_viewer_selection_changed(self) -> None:
+        if self.viewer.textCursor().hasSelection():
+            self._ensure_code_selected()
+        else:
+            self.code_tree.setCurrentItem(None)
 
     def _select_code(self, code_id: int) -> None:
         item = self._code_items_by_id.get(code_id)
