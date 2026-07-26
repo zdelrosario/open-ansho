@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import QPlainTextEdit, QTextEdit
@@ -14,18 +16,34 @@ class VimTextViewer(QPlainTextEdit):
     "WORD" variants: they treat any run of non-blank characters as a
     single unit, so punctuation around or inside a word never stops them
     (unlike lowercase w/b/e, which treat punctuation as its own word).
+
+    G/gg jump to the bottom/top of the whole document. Shift+H/L are
+    viewport-relative instead: H jumps to the start of the first line
+    currently visible in the viewport, L to the start of the last one.
+
+    Pressing / enters search mode: typed characters are interpreted as a
+    Python regular expression and the cursor progressively jumps to the
+    first match at or after the position search started from, updating
+    live as the pattern changes. Matching is smartcase: an all-lowercase
+    pattern matches either case, but any uppercase letter in it makes the
+    match case-sensitive. Enter commits the pattern (leaving the cursor
+    on the match, never applying a code) and Escape cancels, restoring
+    the original cursor position. Once a pattern has been committed, n
+    repeats the search forward from the cursor and Shift+N repeats it
+    backward; both switch to visual mode with the whole match selected,
+    ready to code it with Enter.
     """
 
     NORMAL = "normal"
     VISUAL = "visual"
+    SEARCH = "search"
 
     modeChanged = Signal(str)
+    searchTextChanged = Signal(str)
 
     # Keyed by key code (not text) so Shift-based case doesn't matter here;
     # shifted letters (W/B/E, G) are disambiguated via the Shift modifier.
     _MOTION_KEYS = {
-        Qt.Key_H: QTextCursor.Left,
-        Qt.Key_L: QTextCursor.Right,
         Qt.Key_J: QTextCursor.Down,
         Qt.Key_K: QTextCursor.Up,
         Qt.Key_Left: QTextCursor.Left,  # alias, doesn't conflict with code-cycling (Up/Down only)
@@ -44,6 +62,9 @@ class VimTextViewer(QPlainTextEdit):
         self.mode = self.NORMAL
         self._pending_g = False
         self._code_highlights: list[QTextEdit.ExtraSelection] = []
+        self._search_pattern = ""
+        self._search_buffer = ""
+        self._search_origin = 0
 
         self.cursorPositionChanged.connect(self._refresh_extra_selections)
         self._refresh_extra_selections()
@@ -62,6 +83,10 @@ class VimTextViewer(QPlainTextEdit):
         self.modeChanged.emit(self.mode)
 
     def keyPressEvent(self, event) -> None:
+        if self.mode == self.SEARCH:
+            self._handle_search_key(event)
+            return
+
         key = event.key()
         text = event.text()
         shift = bool(event.modifiers() & Qt.ShiftModifier)
@@ -92,6 +117,22 @@ class VimTextViewer(QPlainTextEdit):
 
         self._pending_g = False
 
+        if key == Qt.Key_H:
+            if shift:
+                self._jump_to_first_visible_line()
+            else:
+                self._move(QTextCursor.Left)
+            event.accept()
+            return
+
+        if key == Qt.Key_L:
+            if shift:
+                self._jump_to_last_visible_line()
+            else:
+                self._move(QTextCursor.Right)
+            event.accept()
+            return
+
         if key == Qt.Key_E:
             self._move_to_word_end(self._is_big_word_char if shift else self._is_word_char)
             event.accept()
@@ -113,6 +154,16 @@ class VimTextViewer(QPlainTextEdit):
             event.accept()
             return
 
+        if key == Qt.Key_Slash:
+            self._enter_search_mode()
+            event.accept()
+            return
+
+        if key == Qt.Key_N:
+            self._jump_to_search_match(-1 if shift else 1)
+            event.accept()
+            return
+
         operation = self._MOTION_KEYS.get(key, self._SYMBOL_MOTIONS.get(text))
         if operation is not None:
             self._move(operation)
@@ -125,8 +176,130 @@ class VimTextViewer(QPlainTextEdit):
         if self.mode == self.VISUAL:
             self.exit_visual_mode()
         else:
+            self._enter_visual_mode()
+
+    def _enter_visual_mode(self) -> None:
+        if self.mode != self.VISUAL:
             self.mode = self.VISUAL
             self.modeChanged.emit(self.mode)
+
+    def _enter_search_mode(self) -> None:
+        self.mode = self.SEARCH
+        self._search_buffer = ""
+        self._search_origin = self.textCursor().position()
+        self.modeChanged.emit(self.mode)
+
+    def _handle_search_key(self, event) -> None:
+        key = event.key()
+        if key == Qt.Key_Escape:
+            self._cancel_search()
+            event.accept()
+            return
+        if key in (Qt.Key_Return, Qt.Key_Enter):
+            self._commit_search()
+            event.accept()
+            return
+        if key == Qt.Key_Backspace:
+            self._search_buffer = self._search_buffer[:-1]
+            self._update_search_preview()
+            event.accept()
+            return
+
+        text = event.text()
+        if text and text.isprintable():
+            self._search_buffer += text
+            self._update_search_preview()
+        event.accept()
+
+    def _update_search_preview(self) -> None:
+        self.searchTextChanged.emit(self._search_buffer)
+        regex = self._compile_search_pattern(self._search_buffer)
+        match = self._find_match(regex, self._search_origin, forward=True) if regex else None
+        if match is not None:
+            self._select_match(match)
+        else:
+            cursor = self.textCursor()
+            cursor.setPosition(self._search_origin)
+            self.setTextCursor(cursor)
+
+    def _commit_search(self) -> None:
+        regex = self._compile_search_pattern(self._search_buffer)
+        if regex is not None:
+            self._search_pattern = self._search_buffer
+            match = self._find_match(regex, self._search_origin, forward=True)
+            if match is not None:
+                cursor = self.textCursor()
+                cursor.setPosition(match.start())
+                self.setTextCursor(cursor)
+                self.ensureCursorVisible()
+        # Re-emit the actually-committed pattern, discarding an empty or
+        # invalid-regex draft rather than leaving it displayed as if saved.
+        self.searchTextChanged.emit(self._search_pattern)
+        self._exit_search_mode()
+
+    def _cancel_search(self) -> None:
+        cursor = self.textCursor()
+        cursor.setPosition(self._search_origin)
+        self.setTextCursor(cursor)
+        self.searchTextChanged.emit(self._search_pattern)
+        self._exit_search_mode()
+
+    def _exit_search_mode(self) -> None:
+        self.mode = self.NORMAL
+        self._search_buffer = ""
+        self.modeChanged.emit(self.mode)
+
+    def _jump_to_search_match(self, direction: int) -> None:
+        regex = self._compile_search_pattern(self._search_pattern)
+        if regex is None:
+            return
+        cursor = self.textCursor()
+        if cursor.hasSelection():
+            # Already sitting on a match (from a previous n/N): search from its
+            # far edge so repeated presses advance instead of re-matching it.
+            from_pos = cursor.selectionEnd() if direction > 0 else cursor.selectionStart()
+        else:
+            from_pos = cursor.position() + 1 if direction > 0 else cursor.position()
+        match = self._find_match(regex, from_pos, forward=direction > 0)
+        if match is None:
+            return
+        self._enter_visual_mode()
+        self._select_match(match)
+
+    def _select_match(self, match: re.Match) -> None:
+        cursor = self.textCursor()
+        cursor.setPosition(match.start())
+        cursor.setPosition(match.end(), QTextCursor.KeepAnchor)
+        self.setTextCursor(cursor)
+        self.ensureCursorVisible()
+
+    @staticmethod
+    def _compile_search_pattern(pattern: str) -> re.Pattern | None:
+        """Compile `pattern`, smartcase-style: an all-lowercase pattern matches
+        either case, but any uppercase letter in it makes the match case-sensitive.
+        """
+        if not pattern:
+            return None
+        flags = 0 if any(ch.isupper() for ch in pattern) else re.IGNORECASE
+        try:
+            return re.compile(pattern, flags)
+        except re.error:
+            return None
+
+    def _find_match(self, regex: re.Pattern, from_pos: int, forward: bool) -> re.Match | None:
+        """Nearest match to `from_pos`, wrapping around the document if needed."""
+        matches = list(regex.finditer(self.toPlainText()))
+        if not matches:
+            return None
+        if forward:
+            for match in matches:
+                if match.start() >= from_pos:
+                    return match
+            return matches[0]
+        for match in reversed(matches):
+            if match.start() < from_pos:
+                return match
+        return matches[-1]
 
     def _move(self, operation) -> None:
         cursor = self.textCursor()
@@ -168,6 +341,29 @@ class VimTextViewer(QPlainTextEdit):
         move_mode = QTextCursor.KeepAnchor if self.mode == self.VISUAL else QTextCursor.MoveAnchor
         cursor.setPosition(position, move_mode)
         self.setTextCursor(cursor)
+
+    def _visible_line_starts(self) -> list[int]:
+        """Character positions of the first character of each line currently visible in the viewport."""
+        viewport_bottom = self.viewport().rect().bottom()
+        starts = []
+        block = self.firstVisibleBlock()
+        while block.isValid():
+            top = self.blockBoundingGeometry(block).translated(self.contentOffset()).top()
+            if top > viewport_bottom:
+                break
+            starts.append(block.position())
+            block = block.next()
+        return starts
+
+    def _jump_to_first_visible_line(self) -> None:
+        starts = self._visible_line_starts()
+        if starts:
+            self._set_position(starts[0])
+
+    def _jump_to_last_visible_line(self) -> None:
+        starts = self._visible_line_starts()
+        if starts:
+            self._set_position(starts[-1])
 
     def _end_of_token_index(self, is_token_char) -> int | None:
         """String index of the last character of the current/next token.
@@ -242,7 +438,13 @@ class VimTextViewer(QPlainTextEdit):
     def _cursor_highlight_selection(self) -> QTextEdit.ExtraSelection:
         block_cursor = QTextCursor(self.textCursor())
         block_cursor.clearSelection()
-        if not block_cursor.atEnd():
+        if block_cursor.atEnd():
+            # No character to highlight ahead of the cursor; fall back to the
+            # character behind it so the block cursor stays visible at the
+            # very end of the document instead of disappearing.
+            if not block_cursor.atStart():
+                block_cursor.movePosition(QTextCursor.PreviousCharacter, QTextCursor.KeepAnchor)
+        else:
             block_cursor.movePosition(QTextCursor.NextCharacter, QTextCursor.KeepAnchor)
 
         fmt = QTextCharFormat()

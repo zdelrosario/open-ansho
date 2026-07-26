@@ -195,7 +195,7 @@ def test_x_does_nothing_outside_any_segment(qtbot, tmp_path):
     assert len(segments) == 1
 
 
-def test_x_does_nothing_in_visual_mode(qtbot, tmp_path):
+def test_x_in_visual_mode_without_selection_does_nothing(qtbot, tmp_path):
     window = MainWindow()
     qtbot.addWidget(window)
     window.show()
@@ -215,6 +215,110 @@ def test_x_does_nothing_in_visual_mode(qtbot, tmp_path):
     assert len(segments) == 1
 
 
+def test_x_in_visual_mode_deletes_segments_intersecting_selection(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    _open_project_with_document(window, tmp_path, "Hello frustrating world.")
+    code_a = window.add_code("Frustration")
+    code_b = window.add_code("Greeting")
+    window.apply_segment(code_a.id, 6, 17)  # "frustrating"
+    window.apply_segment(code_b.id, 0, 5)  # "Hello", outside the selection below
+
+    _place_cursor(window, 8)  # inside "frustrating"
+    window.viewer.setFocus()
+    qtbot.waitUntil(lambda: window.viewer.hasFocus())
+
+    QTest.keyClick(window.viewer, Qt.Key_V)
+    for _ in range(3):
+        QTest.keyClick(window.viewer, Qt.Key_L)
+
+    segments = db.list_segments_for_document(window.conn, window._current_document_id)
+    assert len(segments) == 2  # sanity check: nothing deleted yet
+
+    QTest.keyClick(window.viewer, Qt.Key_X)
+
+    segments = db.list_segments_for_document(window.conn, window._current_document_id)
+    assert len(segments) == 1
+    assert segments[0].code_id == code_b.id
+
+    # x also exits visual mode, like Enter does.
+    assert window.viewer.mode == VimTextViewer.NORMAL
+    assert not window.viewer.textCursor().hasSelection()
+
+
+def test_c_jumps_to_next_segment_and_wraps(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    _open_project_with_document(window, tmp_path, "Hello frustrating world.")
+    code_a = window.add_code("Greeting")
+    code_b = window.add_code("Frustration")
+    window.apply_segment(code_a.id, 0, 5)  # "Hello"
+    window.apply_segment(code_b.id, 6, 17)  # "frustrating"
+
+    _place_cursor(window, 0)
+    window.viewer.setFocus()
+    qtbot.waitUntil(lambda: window.viewer.hasFocus())
+
+    QTest.keyClick(window.viewer, Qt.Key_C)
+    cursor = window.viewer.textCursor()
+    assert (cursor.selectionStart(), cursor.selectionEnd()) == (6, 17)
+    assert cursor.position() == 6  # cursor rests at the start of the segment
+
+    QTest.keyClick(window.viewer, Qt.Key_C)  # wraps back to the first segment
+    cursor = window.viewer.textCursor()
+    assert (cursor.selectionStart(), cursor.selectionEnd()) == (0, 5)
+    assert cursor.position() == 0
+
+
+def test_p_jumps_to_previous_segment_and_wraps(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    _open_project_with_document(window, tmp_path, "Hello frustrating world.")
+    code_a = window.add_code("Greeting")
+    code_b = window.add_code("Frustration")
+    window.apply_segment(code_a.id, 0, 5)  # "Hello"
+    window.apply_segment(code_b.id, 6, 17)  # "frustrating"
+
+    _place_cursor(window, 20)
+    window.viewer.setFocus()
+    qtbot.waitUntil(lambda: window.viewer.hasFocus())
+
+    QTest.keyClick(window.viewer, Qt.Key_P)
+    cursor = window.viewer.textCursor()
+    assert (cursor.selectionStart(), cursor.selectionEnd()) == (6, 17)
+    assert cursor.position() == 6  # cursor rests at the start of the segment
+
+    QTest.keyClick(window.viewer, Qt.Key_P)
+    cursor = window.viewer.textCursor()
+    assert (cursor.selectionStart(), cursor.selectionEnd()) == (0, 5)
+    assert cursor.position() == 0
+
+    QTest.keyClick(window.viewer, Qt.Key_P)  # wraps to the last segment
+    cursor = window.viewer.textCursor()
+    assert (cursor.selectionStart(), cursor.selectionEnd()) == (6, 17)
+    assert cursor.position() == 6
+
+
+def test_c_and_p_do_nothing_without_segments(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    _open_project_with_document(window, tmp_path, "Hello frustrating world.")
+
+    _place_cursor(window, 0)
+    window.viewer.setFocus()
+    qtbot.waitUntil(lambda: window.viewer.hasFocus())
+
+    QTest.keyClick(window.viewer, Qt.Key_C)
+    QTest.keyClick(window.viewer, Qt.Key_P)
+
+    assert window.viewer.textCursor().position() == 0
+    assert not window.viewer.textCursor().hasSelection()
+
+
 def test_x_excludes_segment_ending_exactly_at_cursor(qtbot, tmp_path):
     window = MainWindow()
     qtbot.addWidget(window)
@@ -231,3 +335,117 @@ def test_x_excludes_segment_ending_exactly_at_cursor(qtbot, tmp_path):
 
     segments = db.list_segments_for_document(window.conn, window._current_document_id)
     assert len(segments) == 1
+
+
+def test_search_mode_shows_indicator_and_enter_never_applies_a_code(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    _open_project_with_document(window, tmp_path, "Hello frustrating world.")
+    window.add_code("Frustration")
+
+    _place_cursor(window, 0)
+    window.viewer.setFocus()
+    qtbot.waitUntil(lambda: window.viewer.hasFocus())
+
+    QTest.keyClick(window.viewer, Qt.Key_Slash)
+    assert window.vim_mode_label.text() == "-- SEARCH --"
+
+    QTest.keyClicks(window.viewer, "wor")
+    assert window.viewer.textCursor().hasSelection()
+    assert window.code_tree.currentItem() is not None  # search preview selects text like visual mode does
+
+    QTest.keyClick(window.viewer, Qt.Key_Return)
+
+    # Enter must save the search, never apply the highlighted code to the match.
+    assert db.list_segments_for_document(window.conn, window._current_document_id) == []
+    assert window.vim_mode_label.text() == ""
+    assert window.search_label.text() == "/wor"
+
+
+def test_committed_search_string_stays_visible_after_leaving_search_mode(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    _open_project_with_document(window, tmp_path, "Hello frustrating world.")
+
+    window.viewer.setFocus()
+    qtbot.waitUntil(lambda: window.viewer.hasFocus())
+
+    QTest.keyClick(window.viewer, Qt.Key_Slash)
+    QTest.keyClicks(window.viewer, "wor")
+    QTest.keyClick(window.viewer, Qt.Key_Return)
+
+    assert window.search_label.text() == "/wor"
+
+    QTest.keyClick(window.viewer, Qt.Key_H)  # normal-mode motions don't clear it
+    assert window.search_label.text() == "/wor"
+
+
+def test_escape_during_search_reverts_the_persisted_search_label(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    _open_project_with_document(window, tmp_path, "Hello frustrating world.")
+
+    window.viewer.setFocus()
+    qtbot.waitUntil(lambda: window.viewer.hasFocus())
+
+    QTest.keyClick(window.viewer, Qt.Key_Slash)
+    QTest.keyClicks(window.viewer, "wor")
+    QTest.keyClick(window.viewer, Qt.Key_Return)
+    assert window.search_label.text() == "/wor"
+
+    QTest.keyClick(window.viewer, Qt.Key_Slash)
+    QTest.keyClicks(window.viewer, "xyz")
+    assert window.search_label.text() == "/xyz"
+
+    QTest.keyClick(window.viewer, Qt.Key_Escape)
+
+    assert window.vim_mode_label.text() == ""
+    assert window.search_label.text() == "/wor"  # reverts to the last committed pattern
+
+
+def test_space_while_searching_is_added_to_the_pattern_instead_of_shifting_focus(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    _open_project_with_document(window, tmp_path, "Hello frustrating world.")
+
+    window.viewer.setFocus()
+    qtbot.waitUntil(lambda: window.viewer.hasFocus())
+
+    QTest.keyClick(window.viewer, Qt.Key_Slash)
+    QTest.keyClicks(window.viewer, "a b")
+
+    assert window.viewer.hasFocus()
+    assert window.search_label.text() == "/a b"
+
+
+def test_n_after_search_enters_visual_mode_so_enter_codes_the_match(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    _open_project_with_document(window, tmp_path, "Hello frustrating world.")
+    code = window.add_code("Frustration")
+
+    _place_cursor(window, 0)
+    window.viewer.setFocus()
+    qtbot.waitUntil(lambda: window.viewer.hasFocus())
+
+    QTest.keyClick(window.viewer, Qt.Key_Slash)
+    QTest.keyClicks(window.viewer, "frustrating")
+    QTest.keyClick(window.viewer, Qt.Key_Return)
+
+    QTest.keyClick(window.viewer, Qt.Key_N)
+    assert window.viewer.mode == VimTextViewer.VISUAL
+    assert window.viewer.textCursor().selectedText() == "frustrating"
+
+    window.code_tree.setCurrentItem(window._code_items_by_id[code.id])
+    QTest.keyClick(window.viewer, Qt.Key_Return)
+
+    segments = db.list_segments_for_document(window.conn, window._current_document_id)
+    assert len(segments) == 1
+    assert segments[0].code_id == code.id
+    assert (segments[0].start_offset, segments[0].end_offset) == (6, 17)
+    assert window.viewer.mode == VimTextViewer.NORMAL

@@ -7,7 +7,9 @@ from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QAction, QColor, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
+    QComboBox,
     QFileDialog,
+    QHeaderView,
     QInputDialog,
     QLabel,
     QListWidget,
@@ -54,6 +56,29 @@ HIGHLIGHT_ALPHA = 120
 
 SNIPPET_MAX_LENGTH = 60
 
+CODE_SORT_ALPHABETICAL = "alphabetical"
+CODE_SORT_CURRENT_DOCUMENT = "current_document"
+CODE_SORT_ALL_DOCUMENTS = "all_documents"
+
+CODE_SORT_OPTIONS = [
+    (CODE_SORT_ALPHABETICAL, "Alphabetical"),
+    (CODE_SORT_CURRENT_DOCUMENT, "Segments in Current Document"),
+    (CODE_SORT_ALL_DOCUMENTS, "Segments in All Documents"),
+]
+
+PANE_FOCUS_STYLE = """
+QListWidget#documentPane, QPlainTextEdit#viewerPane,
+QWidget#codebookPane, QWidget#segmentsPane {
+    border: 2px solid transparent;
+}
+QListWidget#documentPane[focused="true"],
+QPlainTextEdit#viewerPane[focused="true"],
+QWidget#codebookPane[focused="true"],
+QWidget#segmentsPane[focused="true"] {
+    border: 2px solid #3399ff;
+}
+"""
+
 
 def _apply_filter_to_item(item: QTreeWidgetItem, query: str) -> bool:
     """Hide items that don't match `query` and have no matching descendant.
@@ -80,31 +105,46 @@ class MainWindow(QMainWindow):
         self.conn: sqlite3.Connection | None = None
         self.project_path: Path | None = None
         self._current_document_id: int | None = None
+        self._code_sort_mode: str = CODE_SORT_ALPHABETICAL
 
         self.setWindowTitle("OpenCoder")
         self.resize(1150, 650)
 
         self.document_list = QListWidget()
+        self.document_list.setObjectName("documentPane")
         self.document_list.currentItemChanged.connect(self._on_document_selected)
 
         self.viewer = VimTextViewer()
+        self.viewer.setObjectName("viewerPane")
         self.viewer.selectionChanged.connect(self._on_viewer_selection_changed)
         self.viewer.modeChanged.connect(self._on_viewer_mode_changed)
+        self.viewer.searchTextChanged.connect(self._on_viewer_search_text_changed)
 
         self.code_tree = CodeTreeWidget()
         self.code_tree.setHeaderHidden(True)
+        self.code_tree.setColumnCount(2)
+        self.code_tree.header().setStretchLastSection(False)
+        self.code_tree.header().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.code_tree.header().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self.code_tree.currentItemChanged.connect(self._on_code_selected)
         self.code_tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.code_tree.customContextMenuRequested.connect(self._on_code_context_menu)
         self.code_tree.codeReparented.connect(self._on_code_reparented)
 
         self._code_items_by_id: dict[int, QTreeWidgetItem] = {}
+        self._last_selected_code_id: int | None = None
+
+        self.code_sort_combo = QComboBox()
+        for value, label in CODE_SORT_OPTIONS:
+            self.code_sort_combo.addItem(label, value)
+        self.code_sort_combo.currentIndexChanged.connect(self._on_code_sort_changed)
 
         self.code_filter_input = CodeFilterLineEdit()
         self.code_filter_input.setPlaceholderText("Filter codes, or type a new name and press Enter…")
         self.code_filter_input.textChanged.connect(self._on_code_filter_changed)
         self.code_filter_input.returnPressed.connect(self._on_code_filter_return_pressed)
         self.code_filter_input.cyclePressed.connect(self._on_code_filter_cycle)
+        self.code_filter_input.escapePressed.connect(self._on_code_filter_escape)
 
         self.apply_code_button = QPushButton("Apply to Selection")
         self.apply_code_button.clicked.connect(self._on_apply_code)
@@ -119,15 +159,20 @@ class MainWindow(QMainWindow):
         code_splitter = QSplitter(Qt.Vertical)
 
         tree_container = QWidget()
+        tree_container.setObjectName("codebookPane")
+        self.codebook_pane = tree_container
         tree_layout = QVBoxLayout(tree_container)
         tree_layout.setContentsMargins(0, 0, 0, 0)
         tree_layout.addWidget(QLabel("Codebook"))
+        tree_layout.addWidget(self.code_sort_combo)
         tree_layout.addWidget(self.code_filter_input)
         tree_layout.addWidget(self.code_tree)
         tree_layout.addWidget(self.apply_code_button)
         code_splitter.addWidget(tree_container)
 
         segments_container = QWidget()
+        segments_container.setObjectName("segmentsPane")
+        self.segments_pane = segments_container
         segments_layout = QVBoxLayout(segments_container)
         segments_layout.setContentsMargins(0, 0, 0, 0)
         segments_layout.addWidget(QLabel("Coded Segments"))
@@ -150,24 +195,52 @@ class MainWindow(QMainWindow):
         self.vim_mode_label = QLabel()
         self.statusBar().addPermanentWidget(self.vim_mode_label)
 
+        self.search_label = QLabel()
+        self.statusBar().addPermanentWidget(self.search_label)
+
+        self.setStyleSheet(PANE_FOCUS_STYLE)
+        self._panes = (self.document_list, self.viewer, self.codebook_pane, self.segments_pane)
+
         QApplication.instance().installEventFilter(self)
+        QApplication.instance().focusChanged.connect(self._on_focus_changed)
 
     def closeEvent(self, event) -> None:
         QApplication.instance().removeEventFilter(self)
+        QApplication.instance().focusChanged.disconnect(self._on_focus_changed)
         super().closeEvent(event)
+
+    def _on_focus_changed(self, _old, new) -> None:
+        for pane in self._panes:
+            focused = new is not None and (pane is new or pane.isAncestorOf(new))
+            pane.setProperty("focused", focused)
+            pane.style().unpolish(pane)
+            pane.style().polish(pane)
 
     def eventFilter(self, watched, event) -> bool:
         if event.type() == QEvent.KeyPress:
+            # While the viewer is composing a search string, key presses that would
+            # otherwise act on its (search-preview) selection must fall through to
+            # VimTextViewer's own key handling instead, so typed text always reaches
+            # the search buffer rather than being hijacked as a coding shortcut.
+            viewer_searching = (
+                QApplication.focusWidget() is self.viewer
+                and self.viewer.mode == VimTextViewer.SEARCH
+            )
             if event.key() == Qt.Key_Space:
-                if QApplication.focusWidget() is not self.code_filter_input:
+                if not viewer_searching and QApplication.focusWidget() is not self.code_filter_input:
                     self.code_filter_input.setFocus()
+                    self.code_filter_input.selectAll()
                     return True
             elif event.key() in (Qt.Key_Up, Qt.Key_Down):
-                if QApplication.focusWidget() is self.viewer and self.viewer.textCursor().hasSelection():
+                if (
+                    not viewer_searching
+                    and QApplication.focusWidget() is self.viewer
+                    and self.viewer.textCursor().hasSelection()
+                ):
                     self._cycle_matched_code(-1 if event.key() == Qt.Key_Up else 1)
                     return True
             elif event.key() in (Qt.Key_Return, Qt.Key_Enter):
-                if QApplication.focusWidget() is self.viewer:
+                if not viewer_searching and QApplication.focusWidget() is self.viewer:
                     current = self.code_tree.currentItem()
                     if current is not None and self._apply_code_to_viewer_selection(
                         current.data(0, Qt.UserRole)
@@ -175,11 +248,21 @@ class MainWindow(QMainWindow):
                         self.viewer.exit_visual_mode()
                         return True
             elif event.key() == Qt.Key_X:
-                if (
-                    QApplication.focusWidget() is self.viewer
-                    and self.viewer.mode == VimTextViewer.NORMAL
-                ):
-                    self._delete_segments_at_cursor()
+                if QApplication.focusWidget() is self.viewer:
+                    if self.viewer.mode == VimTextViewer.VISUAL:
+                        self._delete_segments_in_viewer_selection()
+                        self.viewer.exit_visual_mode()
+                        return True
+                    elif self.viewer.mode == VimTextViewer.NORMAL:
+                        self._delete_segments_at_cursor()
+                        return True
+            elif event.key() == Qt.Key_C:
+                if QApplication.focusWidget() is self.viewer and self.viewer.mode == VimTextViewer.NORMAL:
+                    self._jump_to_adjacent_segment(1)
+                    return True
+            elif event.key() == Qt.Key_P:
+                if QApplication.focusWidget() is self.viewer and self.viewer.mode == VimTextViewer.NORMAL:
+                    self._jump_to_adjacent_segment(-1)
                     return True
         return super().eventFilter(watched, event)
 
@@ -257,20 +340,39 @@ class MainWindow(QMainWindow):
             self._current_document_id = None
             self.viewer.clear()
             self.viewer.set_code_highlights([])
+            self._refresh_codes()
             return
         doc_id = current.data(Qt.UserRole)
         doc = db.get_document(self.conn, doc_id)
         self._current_document_id = doc_id
         self.viewer.setPlainText(doc.content if doc else "")
         self._refresh_highlights()
+        self._refresh_codes()
 
     def _on_viewer_mode_changed(self, mode: str) -> None:
-        self.vim_mode_label.setText("-- VISUAL --" if mode == VimTextViewer.VISUAL else "")
+        if mode == VimTextViewer.VISUAL:
+            self.vim_mode_label.setText("-- VISUAL --")
+        elif mode == VimTextViewer.SEARCH:
+            self.vim_mode_label.setText("-- SEARCH --")
+        else:
+            self.vim_mode_label.setText("")
+
+    def _on_viewer_search_text_changed(self, text: str) -> None:
+        self.search_label.setText(f"/{text}" if text else "")
 
     def _on_code_selected(
-        self, _current: QTreeWidgetItem | None, _previous: QTreeWidgetItem | None
+        self, current: QTreeWidgetItem | None, _previous: QTreeWidgetItem | None
     ) -> None:
+        if current is not None:
+            self._last_selected_code_id = current.data(0, Qt.UserRole)
         self._refresh_segments_for_selected_code()
+
+    def _on_code_filter_escape(self) -> None:
+        self.viewer.setFocus()
+
+    def _on_code_sort_changed(self, index: int) -> None:
+        self._code_sort_mode = self.code_sort_combo.itemData(index)
+        self._refresh_codes()
 
     def _on_code_reparented(self, code_id: int, new_parent_id: int | None) -> None:
         if self.conn is None:
@@ -298,13 +400,19 @@ class MainWindow(QMainWindow):
         matches = self._matching_code_items(text)
         if matches:
             code_id = self._current_or_first_match_id(matches)
-            if not self._apply_code_to_viewer_selection(code_id):
+            if self._apply_code_to_viewer_selection(code_id):
+                self.viewer.exit_visual_mode()
+                self.viewer.setFocus()
+            else:
                 self._select_code(code_id)
             return
 
         code = self.add_code(text)
         self.code_filter_input.clear()
         self._select_code(code.id)
+        if self._apply_code_to_viewer_selection(code.id):
+            self.viewer.exit_visual_mode()
+            self.viewer.setFocus()
 
     def _on_apply_code(self) -> None:
         if self._current_document_id is None:
@@ -332,6 +440,7 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
         new_child_action = menu.addAction("New Child Code…")
         rename_action = menu.addAction("Rename…")
+        delete_action = menu.addAction("Delete…")
 
         chosen = menu.exec(self.code_tree.viewport().mapToGlobal(pos))
         if chosen is None:
@@ -340,6 +449,8 @@ class MainWindow(QMainWindow):
             self._on_new_child_code(item.data(0, Qt.UserRole))
         elif chosen is rename_action:
             self._on_rename_code(item.data(0, Qt.UserRole), item.text(0))
+        elif chosen is delete_action:
+            self._on_delete_code(item.data(0, Qt.UserRole), item.text(0))
 
     def _on_new_child_code(self, parent_id: int) -> None:
         name, ok = QInputDialog.getText(self, "New Child Code", "Code name:")
@@ -352,6 +463,19 @@ class MainWindow(QMainWindow):
         if not ok or not name.strip():
             return
         self.rename_code(code_id, name.strip())
+
+    def _on_delete_code(self, code_id: int, name: str) -> None:
+        reply = QMessageBox.question(
+            self,
+            "Delete Code",
+            f"Delete “{name}”? Its coded segments will be removed, and any "
+            "child codes will move up to take its place.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+        self.delete_code(code_id)
 
     def _on_segment_activated(self, item: QListWidgetItem) -> None:
         document_id, start, end = item.data(Qt.UserRole)
@@ -442,6 +566,15 @@ class MainWindow(QMainWindow):
         self._refresh_codes()
         return code
 
+    def delete_code(self, code_id: int) -> None:
+        if self.conn is None:
+            raise RuntimeError("No project open")
+        db.delete_code(self.conn, code_id)
+        if self._last_selected_code_id == code_id:
+            self._last_selected_code_id = None
+        self._refresh_codes()
+        self._refresh_highlights()
+
     def _is_descendant_of(self, candidate_id: int, ancestor_id: int) -> bool:
         if self.conn is None:
             return False
@@ -457,6 +590,7 @@ class MainWindow(QMainWindow):
         if self.conn is None or self._current_document_id is None:
             return
         db.create_segment(self.conn, self._current_document_id, code_id, start, end)
+        self._refresh_codes()
         self._refresh_highlights()
         self._refresh_segments_for_selected_code()
 
@@ -477,8 +611,55 @@ class MainWindow(QMainWindow):
             return
         for segment in intersecting:
             db.delete_segment(self.conn, segment.id)
+        self._refresh_codes()
         self._refresh_highlights()
         self._refresh_segments_for_selected_code()
+
+    def _delete_segments_in_viewer_selection(self) -> None:
+        if self.conn is None or self._current_document_id is None:
+            return
+        cursor = self.viewer.textCursor()
+        if not cursor.hasSelection():
+            return
+        start, end = cursor.selectionStart(), cursor.selectionEnd()
+        segments = db.list_segments_for_document(self.conn, self._current_document_id)
+        intersecting = [s for s in segments if s.start_offset < end and start < s.end_offset]
+        if not intersecting:
+            return
+        for segment in intersecting:
+            db.delete_segment(self.conn, segment.id)
+        self._refresh_codes()
+        self._refresh_highlights()
+        self._refresh_segments_for_selected_code()
+
+    def _jump_to_adjacent_segment(self, direction: int) -> None:
+        segment = self._adjacent_segment(direction)
+        if segment is None:
+            return
+        cursor = self.viewer.textCursor()
+        cursor.setPosition(segment.end_offset)
+        cursor.setPosition(segment.start_offset, QTextCursor.KeepAnchor)
+        self.viewer.setTextCursor(cursor)
+        self.viewer.ensureCursorVisible()
+
+    def _adjacent_segment(self, direction: int):
+        """Segment before/after the cursor, wrapping around the document."""
+        if self.conn is None or self._current_document_id is None:
+            return None
+        segments = sorted(
+            db.list_segments_for_document(self.conn, self._current_document_id),
+            key=lambda s: (s.start_offset, s.end_offset),
+        )
+        if not segments:
+            return None
+
+        cursor = self.viewer.textCursor()
+        position = cursor.selectionStart() if cursor.hasSelection() else cursor.position()
+        if direction > 0:
+            later = [s for s in segments if s.start_offset > position]
+            return later[0] if later else segments[0]
+        earlier = [s for s in segments if s.start_offset < position]
+        return earlier[-1] if earlier else segments[-1]
 
     def _set_connection(self, conn: sqlite3.Connection, path: Path) -> None:
         if self.conn is not None:
@@ -501,7 +682,19 @@ class MainWindow(QMainWindow):
             item.setData(Qt.UserRole, doc.id)
             self.document_list.addItem(item)
 
+    def _code_sort_key(self, current_doc_counts: dict[int, int], total_counts: dict[int, int]):
+        if self._code_sort_mode == CODE_SORT_CURRENT_DOCUMENT:
+            return lambda code: (-current_doc_counts.get(code.id, 0), code.name.lower())
+        if self._code_sort_mode == CODE_SORT_ALL_DOCUMENTS:
+            return lambda code: (-total_counts.get(code.id, 0), code.name.lower())
+        return lambda code: code.name.lower()
+
     def _refresh_codes(self) -> None:
+        previous_current = self.code_tree.currentItem()
+        previous_code_id = (
+            previous_current.data(0, Qt.UserRole) if previous_current is not None else None
+        )
+
         self.code_tree.clear()
         self.segment_list.clear()
         self._code_items_by_id = {}
@@ -509,22 +702,43 @@ class MainWindow(QMainWindow):
             return
 
         codes = db.list_codes(self.conn)
+        children_by_parent: dict[int | None, list[Code]] = {}
         for code in codes:
-            item = QTreeWidgetItem([code.name])
-            item.setData(0, Qt.UserRole, code.id)
-            if code.color:
-                item.setBackground(0, QColor(code.color))
-            self._code_items_by_id[code.id] = item
+            children_by_parent.setdefault(code.parent_id, []).append(code)
 
-        for code in codes:
-            item = self._code_items_by_id[code.id]
-            parent_item = self._code_items_by_id.get(code.parent_id) if code.parent_id else None
-            if parent_item is not None:
-                parent_item.addChild(item)
-            else:
-                self.code_tree.addTopLevelItem(item)
+        current_doc_counts = (
+            db.count_segments_by_code(self.conn, self._current_document_id)
+            if self._current_document_id is not None
+            else {}
+        )
+        total_counts = db.count_segments_by_code(self.conn)
+
+        sort_key = self._code_sort_key(current_doc_counts, total_counts)
+        for children in children_by_parent.values():
+            children.sort(key=sort_key)
+
+        def add_children(parent_id: int | None, parent_item: QTreeWidgetItem | None) -> None:
+            for code in children_by_parent.get(parent_id, []):
+                count_label = f"{current_doc_counts.get(code.id, 0)}/{total_counts.get(code.id, 0)}"
+                item = QTreeWidgetItem([code.name, count_label])
+                item.setData(0, Qt.UserRole, code.id)
+                item.setTextAlignment(1, Qt.AlignRight | Qt.AlignVCenter)
+                if code.color:
+                    item.setBackground(0, QColor(code.color))
+                self._code_items_by_id[code.id] = item
+                if parent_item is not None:
+                    parent_item.addChild(item)
+                else:
+                    self.code_tree.addTopLevelItem(item)
+                add_children(code.id, item)
+
+        add_children(None, None)
 
         self.code_tree.expandAll()
+        if previous_code_id is not None:
+            restored = self._code_items_by_id.get(previous_code_id)
+            if restored is not None:
+                self.code_tree.setCurrentItem(restored)
         self._apply_code_filter(self.code_filter_input.text())
         self._sync_matched_code_selection()
 
@@ -627,12 +841,21 @@ class MainWindow(QMainWindow):
         self.code_tree.setCurrentItem(matches[index])
 
     def _ensure_code_selected(self) -> None:
-        """Guarantee some code is selected, without disturbing an existing selection."""
+        """Guarantee some code is selected, without disturbing an existing selection.
+
+        Prefers restoring whichever code was last selected, so repeated
+        coding with the same code doesn't require re-picking it each time.
+        """
         if self.code_tree.currentItem() is not None:
             return
         matches = self._matching_code_items(self.code_filter_input.text())
-        if matches:
-            self.code_tree.setCurrentItem(matches[0])
+        if not matches:
+            return
+        last_item = self._code_items_by_id.get(self._last_selected_code_id)
+        if last_item in matches:
+            self.code_tree.setCurrentItem(last_item)
+            return
+        self.code_tree.setCurrentItem(matches[0])
 
     def _on_viewer_selection_changed(self) -> None:
         if self.viewer.textCursor().hasSelection():

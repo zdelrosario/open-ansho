@@ -69,6 +69,48 @@ def test_set_code_parent_none_makes_it_top_level(conn):
     assert updated.parent_id is None
 
 
+def test_delete_code_reparents_children_to_grandparent(conn):
+    grandparent = db.create_code(conn, "Emotions")
+    parent = db.create_code(conn, "Frustration", parent_id=grandparent.id)
+    child = db.create_code(conn, "Anger", parent_id=parent.id)
+
+    db.delete_code(conn, parent.id)
+
+    assert db.get_code(conn, parent.id) is None
+    assert db.get_code(conn, child.id).parent_id == grandparent.id
+
+
+def test_delete_code_makes_children_root_when_no_grandparent(conn):
+    parent = db.create_code(conn, "Emotions")
+    child = db.create_code(conn, "Frustration", parent_id=parent.id)
+
+    db.delete_code(conn, parent.id)
+
+    assert db.get_code(conn, parent.id) is None
+    assert db.get_code(conn, child.id).parent_id is None
+
+
+def test_delete_code_removes_its_own_segments(conn):
+    doc = db.create_document(conn, "doc.txt", "Hello world.")
+    code = db.create_code(conn, "Greeting")
+    db.create_segment(conn, doc.id, code.id, 0, 5)
+
+    db.delete_code(conn, code.id)
+
+    assert db.list_segments_for_document(conn, doc.id) == []
+
+
+def test_delete_code_leaves_siblings_and_other_codes_alone(conn):
+    parent = db.create_code(conn, "Emotions")
+    keep_child = db.create_code(conn, "Anger", parent_id=parent.id)
+    other = db.create_code(conn, "Reward")
+
+    db.delete_code(conn, parent.id)
+
+    assert db.get_code(conn, keep_child.id).parent_id is None
+    assert db.get_code(conn, other.id) is not None
+
+
 def test_create_segment_links_document_and_code(conn):
     doc = db.create_document(conn, "interview_01.txt", "Hello world.")
     code = db.create_code(conn, "Greeting")
@@ -126,3 +168,34 @@ def test_delete_segment(conn):
 
     assert db.get_segment(conn, segment.id) is None
     assert db.list_segments_for_document(conn, doc.id) == []
+
+
+def test_count_segments_by_code_across_all_documents(conn):
+    doc_a = db.create_document(conn, "a.txt", "Hello world.")
+    doc_b = db.create_document(conn, "b.txt", "Hello again.")
+    code_a = db.create_code(conn, "Greeting")
+    code_b = db.create_code(conn, "Other")
+
+    db.create_segment(conn, doc_a.id, code_a.id, 0, 5)
+    db.create_segment(conn, doc_b.id, code_a.id, 0, 5)
+    db.create_segment(conn, doc_a.id, code_b.id, 6, 11)
+
+    counts = db.count_segments_by_code(conn)
+    assert counts == {code_a.id: 2, code_b.id: 1}
+
+
+def test_count_segments_by_code_for_one_document(conn):
+    doc_a = db.create_document(conn, "a.txt", "Hello world.")
+    doc_b = db.create_document(conn, "b.txt", "Hello again.")
+    code = db.create_code(conn, "Greeting")
+
+    db.create_segment(conn, doc_a.id, code.id, 0, 5)
+    db.create_segment(conn, doc_b.id, code.id, 0, 5)
+
+    assert db.count_segments_by_code(conn, doc_a.id) == {code.id: 1}
+
+
+def test_count_segments_by_code_omits_uncoded_codes(conn):
+    code = db.create_code(conn, "Unused")
+
+    assert db.count_segments_by_code(conn) == {}

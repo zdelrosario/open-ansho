@@ -141,6 +141,22 @@ def set_code_parent(conn: sqlite3.Connection, code_id: int, parent_id: int | Non
     return get_code(conn, code_id)
 
 
+def delete_code(conn: sqlite3.Connection, code_id: int) -> None:
+    """Delete a code, re-parenting its children to its own parent (or to root).
+
+    `codes.parent_id` cascades on delete, so children would otherwise be
+    deleted along with their parent; re-pointing them first avoids that.
+    """
+    code = get_code(conn, code_id)
+    if code is None:
+        return
+    conn.execute(
+        "UPDATE codes SET parent_id = ? WHERE parent_id = ?", (code.parent_id, code_id)
+    )
+    conn.execute("DELETE FROM codes WHERE id = ?", (code_id,))
+    conn.commit()
+
+
 def create_segment(
     conn: sqlite3.Connection,
     document_id: int,
@@ -185,6 +201,26 @@ def list_segments_for_code(conn: sqlite3.Connection, code_id: int) -> list[Segme
         "SELECT * FROM segments WHERE code_id = ? ORDER BY id", (code_id,)
     ).fetchall()
     return [Segment(**row) for row in rows]
+
+
+def count_segments_by_code(
+    conn: sqlite3.Connection, document_id: int | None = None
+) -> dict[int, int]:
+    """Map code_id -> number of segments coded with it.
+
+    Codes with no segments are omitted, so callers should default to 0.
+    """
+    if document_id is None:
+        rows = conn.execute(
+            "SELECT code_id, COUNT(*) AS count FROM segments GROUP BY code_id"
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT code_id, COUNT(*) AS count FROM segments WHERE document_id = ? "
+            "GROUP BY code_id",
+            (document_id,),
+        ).fetchall()
+    return {row["code_id"]: row["count"] for row in rows}
 
 
 def delete_segment(conn: sqlite3.Connection, segment_id: int) -> None:
