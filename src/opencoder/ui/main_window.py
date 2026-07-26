@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, Qt
+from PySide6.QtCore import QEvent, QSettings, Qt
 from PySide6.QtGui import QAction, QColor, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
@@ -40,6 +40,11 @@ JSON_FILTER = "JSON Files (*.json)"
 
 PROJECT_SECTION_LABEL_OPEN = "Project"
 PROJECT_SECTION_LABEL_CLOSED = "Project (first open a project)"
+
+SETTINGS_ORGANIZATION = "OpenCoder"
+SETTINGS_APPLICATION = "OpenCoder"
+RECENT_PROJECTS_KEY = "recentProjects"
+MAX_RECENT_PROJECTS = 10
 
 CODE_COLOR_PALETTE = [
     "#f94144",
@@ -106,6 +111,7 @@ class MainWindow(QMainWindow):
         self.project_path: Path | None = None
         self._current_document_id: int | None = None
         self._code_sort_mode: str = CODE_SORT_ALPHABETICAL
+        self._settings = QSettings(SETTINGS_ORGANIZATION, SETTINGS_APPLICATION)
 
         self.setWindowTitle("OpenCoder")
         self.resize(1150, 650)
@@ -278,6 +284,10 @@ class MainWindow(QMainWindow):
         open_action.triggered.connect(self._on_open_project)
         file_menu.addAction(open_action)
 
+        self.recent_projects_menu = QMenu("Open &Recent", self)
+        file_menu.addMenu(self.recent_projects_menu)
+        self._refresh_recent_projects_menu()
+
         file_menu.addSeparator()
 
         # -- Project contents: import/export, require an open project -----
@@ -296,6 +306,10 @@ class MainWindow(QMainWindow):
         self.export_json_action = QAction("Export Segments (&JSON)…", self)
         self.export_json_action.triggered.connect(self._on_export_json)
         file_menu.addAction(self.export_json_action)
+
+        self.close_project_action = QAction("&Close Project", self)
+        self.close_project_action.triggered.connect(self.close_project)
+        file_menu.addAction(self.close_project_action)
 
         file_menu.addSeparator()
 
@@ -525,6 +539,22 @@ class MainWindow(QMainWindow):
     def open_project(self, path: Path) -> None:
         self._set_connection(db.connect(path), path)
 
+    def close_project(self) -> None:
+        if self.conn is None:
+            return
+        self.conn.close()
+        self.conn = None
+        self.project_path = None
+        self._current_document_id = None
+        self._last_selected_code_id = None
+        self.viewer.clear()
+        self.viewer.set_code_highlights([])
+        self._refresh_documents()
+        self._refresh_codes()
+        self._update_actions_enabled()
+        self.setWindowTitle("OpenCoder")
+        self.statusBar().showMessage("No project open")
+
     def import_document(self, path: Path) -> None:
         if self.conn is None:
             return
@@ -672,6 +702,37 @@ class MainWindow(QMainWindow):
         self._refresh_documents()
         self._refresh_codes()
         self._update_actions_enabled()
+        self._add_recent_project(path)
+
+    def _recent_projects(self) -> list[Path]:
+        raw = self._settings.value(RECENT_PROJECTS_KEY, [])
+        if isinstance(raw, str):
+            raw = [raw]
+        paths = [Path(entry) for entry in raw]
+        existing = [path for path in paths if path.exists()]
+        if existing != paths:
+            self._settings.setValue(RECENT_PROJECTS_KEY, [str(path) for path in existing])
+        return existing
+
+    def _add_recent_project(self, path: Path) -> None:
+        path = path.resolve()
+        remaining = [p for p in self._recent_projects() if p != path]
+        updated = [path, *remaining][:MAX_RECENT_PROJECTS]
+        self._settings.setValue(RECENT_PROJECTS_KEY, [str(p) for p in updated])
+        self._refresh_recent_projects_menu()
+
+    def _refresh_recent_projects_menu(self) -> None:
+        self.recent_projects_menu.clear()
+        recent = self._recent_projects()
+        if not recent:
+            empty_action = QAction("No Recent Projects", self)
+            empty_action.setEnabled(False)
+            self.recent_projects_menu.addAction(empty_action)
+            return
+        for path in recent:
+            action = QAction(str(path), self)
+            action.triggered.connect(lambda _checked=False, p=path: self.open_project(p))
+            self.recent_projects_menu.addAction(action)
 
     def _refresh_documents(self) -> None:
         self.document_list.clear()
@@ -884,6 +945,7 @@ class MainWindow(QMainWindow):
         self.import_action.setEnabled(has_project)
         self.export_csv_action.setEnabled(has_project)
         self.export_json_action.setEnabled(has_project)
+        self.close_project_action.setEnabled(has_project)
         self.code_frequency_action.setEnabled(has_project)
         self.project_section_action.setText(
             PROJECT_SECTION_LABEL_OPEN if has_project else PROJECT_SECTION_LABEL_CLOSED
