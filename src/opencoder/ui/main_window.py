@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from opencoder import db, reporting
+from opencoder import db, reporting, user
 from opencoder.db import Code
 from opencoder.ui.code_filter_input import CodeFilterLineEdit
 from opencoder.ui.code_tree import CodeTreeWidget
@@ -42,6 +42,8 @@ JSON_FILTER = "JSON Files (*.json)"
 
 PROJECT_SECTION_LABEL_OPEN = "Project"
 PROJECT_SECTION_LABEL_CLOSED = "Project (first open a project)"
+
+NO_USERNAME_TEXT = "(NO USERNAME)"
 
 SETTINGS_ORGANIZATION = "OpenCoder"
 SETTINGS_APPLICATION = "OpenCoder"
@@ -108,13 +110,13 @@ def _apply_filter_to_item(item: QTreeWidgetItem, query: str) -> bool:
     return visible
 
 
-def _segment_tooltip(full_text: str, doc_name: str) -> str:
-    """Rich-text tooltip body: full segment text plus "[doc name]", word-wrapped."""
+def _segment_tooltip(full_text: str, doc_name: str, username: str) -> str:
+    """Rich-text tooltip body: full segment text plus "[doc name, username]", word-wrapped."""
     escaped_text = html.escape(full_text)
-    escaped_doc_name = html.escape(doc_name)
+    escaped_label = html.escape(f"{doc_name}, {username}")
     return (
         f'<div style="max-width: {TOOLTIP_MAX_WIDTH_PX}px;">'
-        f"{escaped_text} [{escaped_doc_name}]"
+        f"{escaped_text} [{escaped_label}]"
         f"</div>"
     )
 
@@ -124,6 +126,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.conn: sqlite3.Connection | None = None
         self.project_path: Path | None = None
+        self.username: str | None = None
         self._current_document_id: int | None = None
         self._code_sort_mode: str = CODE_SORT_ALPHABETICAL
         self._settings = QSettings(SETTINGS_ORGANIZATION, SETTINGS_APPLICATION)
@@ -208,9 +211,19 @@ class MainWindow(QMainWindow):
 
         code_layout.addWidget(code_splitter)
 
+        self.username_label = QLabel()
+        self.username_label.setAlignment(Qt.AlignCenter)
+        self._update_username_label()
+
+        viewer_container = QWidget()
+        viewer_layout = QVBoxLayout(viewer_container)
+        viewer_layout.setContentsMargins(0, 0, 0, 0)
+        viewer_layout.addWidget(self.viewer)
+        viewer_layout.addWidget(self.username_label)
+
         splitter = QSplitter()
         splitter.addWidget(self.document_list)
-        splitter.addWidget(self.viewer)
+        splitter.addWidget(viewer_container)
         splitter.addWidget(code_panel)
         splitter.setStretchFactor(1, 1)
         self.setCentralWidget(splitter)
@@ -361,13 +374,41 @@ class MainWindow(QMainWindow):
             return
         if not path_str.endswith(".sqlite"):
             path_str += ".sqlite"
-        self.create_project(Path(path_str))
+        path = Path(path_str)
+        self.create_project(path)
+        self._ensure_username(path)
 
     def _on_open_project(self) -> None:
         path_str, _ = QFileDialog.getOpenFileName(self, "Open Project", "", PROJECT_FILTER)
         if not path_str:
             return
-        self.open_project(Path(path_str))
+        path = Path(path_str)
+        self.open_project(path)
+        self._ensure_username(path)
+
+    def _on_open_recent_project(self, path: Path) -> None:
+        self.open_project(path)
+        self._ensure_username(path)
+
+    def _ensure_username(self, path: Path) -> str | None:
+        """Prompt for a username the first time this project's directory is
+        opened, then reuse the stored name silently on later opens."""
+        existing = user.read_username(path)
+        if existing:
+            self.username = existing
+            self._update_username_label()
+            return existing
+        name, ok = QInputDialog.getText(self, "Username", "Enter your username:")
+        name = name.strip() if ok else ""
+        if not name:
+            return None
+        user.write_username(path, name)
+        self.username = name
+        self._update_username_label()
+        return name
+
+    def _update_username_label(self) -> None:
+        self.username_label.setText(self.username or NO_USERNAME_TEXT)
 
     def _on_import_document(self) -> None:
         path_str, _ = QFileDialog.getOpenFileName(self, "Import Document", "", TEXT_FILTER)
@@ -594,6 +635,8 @@ class MainWindow(QMainWindow):
         self.conn.close()
         self.conn = None
         self.project_path = None
+        self.username = None
+        self._update_username_label()
         self._current_document_id = None
         self._last_selected_code_id = None
         self.viewer.clear()
@@ -674,7 +717,9 @@ class MainWindow(QMainWindow):
     def apply_segment(self, code_id: int, start: int, end: int) -> None:
         if self.conn is None or self._current_document_id is None:
             return
-        db.create_segment(self.conn, self._current_document_id, code_id, start, end)
+        db.create_segment(
+            self.conn, self._current_document_id, code_id, start, end, created_by=self.username
+        )
         self._refresh_codes()
         self._refresh_highlights()
         self._render_segments_panel()
@@ -751,6 +796,8 @@ class MainWindow(QMainWindow):
             self.conn.close()
         self.conn = conn
         self.project_path = path
+        self.username = None
+        self._update_username_label()
         self._current_document_id = None
         self.setWindowTitle(f"OpenCoder — {path.name}")
         self.statusBar().showMessage(str(path))
@@ -786,7 +833,7 @@ class MainWindow(QMainWindow):
             return
         for path in recent:
             action = QAction(str(path), self)
-            action.triggered.connect(lambda _checked=False, p=path: self.open_project(p))
+            action.triggered.connect(lambda _checked=False, p=path: self._on_open_recent_project(p))
             self.recent_projects_menu.addAction(action)
 
     def _refresh_documents(self) -> None:
@@ -931,16 +978,17 @@ class MainWindow(QMainWindow):
         for segment in segments:
             doc = documents_by_id.get(segment.document_id)
             doc_name = doc.name if doc else "?"
+            username = segment.created_by or NO_USERNAME_TEXT
             full_text = doc.content[segment.start_offset : segment.end_offset] if doc else ""
             snippet = full_text
             if len(snippet) > SNIPPET_MAX_LENGTH:
                 snippet = snippet[:SNIPPET_MAX_LENGTH] + "…"
 
-            list_item = QListWidgetItem(f"“{snippet}” [{doc_name}]")
+            list_item = QListWidgetItem(f"“{snippet}” [{doc_name}, {username}]")
             list_item.setData(
                 Qt.UserRole, (segment.document_id, segment.start_offset, segment.end_offset)
             )
-            list_item.setToolTip(_segment_tooltip(full_text, doc_name))
+            list_item.setToolTip(_segment_tooltip(full_text, doc_name, username))
             if segment.document_id != self._current_document_id:
                 list_item.setForeground(OTHER_DOCUMENT_TEXT_COLOR)
             self.segment_list.addItem(list_item)

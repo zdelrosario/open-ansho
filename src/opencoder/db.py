@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS segments (
     start_offset INTEGER NOT NULL,
     end_offset INTEGER NOT NULL,
     memo TEXT,
+    created_by TEXT,
     created_at TEXT NOT NULL
 );
 """
@@ -64,6 +65,7 @@ class Segment:
     start_offset: int
     end_offset: int
     memo: str | None
+    created_by: str | None
     created_at: str
 
 
@@ -81,7 +83,15 @@ def connect(path: str | Path) -> sqlite3.Connection:
 
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
+    _migrate(conn)
     conn.commit()
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Add columns introduced after a project's initial creation."""
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(segments)")}
+    if "created_by" not in columns:
+        conn.execute("ALTER TABLE segments ADD COLUMN created_by TEXT")
 
 
 def create_document(conn: sqlite3.Connection, name: str, content: str) -> Document:
@@ -176,16 +186,17 @@ def create_segment(
     start_offset: int,
     end_offset: int,
     memo: str | None = None,
+    created_by: str | None = None,
 ) -> Segment:
     if end_offset <= start_offset:
         raise ValueError("end_offset must be greater than start_offset")
     cur = conn.execute(
         """
         INSERT INTO segments
-            (document_id, code_id, start_offset, end_offset, memo, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
+            (document_id, code_id, start_offset, end_offset, memo, created_by, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
-        (document_id, code_id, start_offset, end_offset, memo, _now()),
+        (document_id, code_id, start_offset, end_offset, memo, created_by, _now()),
     )
     conn.commit()
     return get_segment(conn, cur.lastrowid)
