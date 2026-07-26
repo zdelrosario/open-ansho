@@ -25,11 +25,17 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from opencoder import db
+from opencoder import db, reporting
 from opencoder.db import Code
+from opencoder.ui.report_dialog import CodeFrequencyDialog
 
 PROJECT_FILTER = "OpenCoder Project (*.sqlite)"
 TEXT_FILTER = "Text Files (*.txt);;All Files (*)"
+CSV_FILTER = "CSV Files (*.csv)"
+JSON_FILTER = "JSON Files (*.json)"
+
+PROJECT_SECTION_LABEL_OPEN = "Project"
+PROJECT_SECTION_LABEL_CLOSED = "Project (first open a project)"
 
 CODE_COLOR_PALETTE = [
     "#f94144",
@@ -118,6 +124,7 @@ class MainWindow(QMainWindow):
     def _build_menu(self) -> None:
         file_menu = self.menuBar().addMenu("&File")
 
+        # -- Project management -------------------------------------------
         new_action = QAction("&New Project…", self)
         new_action.triggered.connect(self._on_new_project)
         file_menu.addAction(new_action)
@@ -128,15 +135,35 @@ class MainWindow(QMainWindow):
 
         file_menu.addSeparator()
 
+        # -- Project contents: import/export, require an open project -----
+        self.project_section_action = QAction(PROJECT_SECTION_LABEL_CLOSED, self)
+        self.project_section_action.setEnabled(False)
+        file_menu.addAction(self.project_section_action)
+
         self.import_action = QAction("&Import Document…", self)
         self.import_action.triggered.connect(self._on_import_document)
         file_menu.addAction(self.import_action)
 
+        self.export_csv_action = QAction("Export Segments (&CSV)…", self)
+        self.export_csv_action.triggered.connect(self._on_export_csv)
+        file_menu.addAction(self.export_csv_action)
+
+        self.export_json_action = QAction("Export Segments (&JSON)…", self)
+        self.export_json_action.triggered.connect(self._on_export_json)
+        file_menu.addAction(self.export_json_action)
+
         file_menu.addSeparator()
 
+        # -- Application ----------------------------------------------------
         quit_action = QAction("&Quit", self)
         quit_action.triggered.connect(self.close)
         file_menu.addAction(quit_action)
+
+        view_menu = self.menuBar().addMenu("&View")
+
+        self.code_frequency_action = QAction("&Code Frequency Report…", self)
+        self.code_frequency_action.triggered.connect(self._on_code_frequency_report)
+        view_menu.addAction(self.code_frequency_action)
 
     # -- Dialog-triggering slots -------------------------------------------
 
@@ -243,6 +270,35 @@ class MainWindow(QMainWindow):
         cursor.setPosition(end, QTextCursor.KeepAnchor)
         self.viewer.setTextCursor(cursor)
         self.viewer.ensureCursorVisible()
+
+    def _on_export_csv(self) -> None:
+        if self.conn is None:
+            return
+        path_str, _ = QFileDialog.getSaveFileName(self, "Export Segments (CSV)", "", CSV_FILTER)
+        if not path_str:
+            return
+        if not path_str.endswith(".csv"):
+            path_str += ".csv"
+        count = reporting.export_segments_csv(self.conn, path_str)
+        QMessageBox.information(self, "Export Complete", f"Exported {count} segment(s).")
+
+    def _on_export_json(self) -> None:
+        if self.conn is None:
+            return
+        path_str, _ = QFileDialog.getSaveFileName(self, "Export Segments (JSON)", "", JSON_FILTER)
+        if not path_str:
+            return
+        if not path_str.endswith(".json"):
+            path_str += ".json"
+        count = reporting.export_segments_json(self.conn, path_str)
+        QMessageBox.information(self, "Export Complete", f"Exported {count} segment(s).")
+
+    def _on_code_frequency_report(self) -> None:
+        if self.conn is None:
+            return
+        rows = reporting.code_frequency(self.conn)
+        dialog = CodeFrequencyDialog(rows, self)
+        dialog.exec()
 
     # -- Testable logic, independent of QFileDialog / QMessageBox ---------
 
@@ -399,4 +455,11 @@ class MainWindow(QMainWindow):
         return CODE_COLOR_PALETTE[count % len(CODE_COLOR_PALETTE)]
 
     def _update_actions_enabled(self) -> None:
-        self.import_action.setEnabled(self.conn is not None)
+        has_project = self.conn is not None
+        self.import_action.setEnabled(has_project)
+        self.export_csv_action.setEnabled(has_project)
+        self.export_json_action.setEnabled(has_project)
+        self.code_frequency_action.setEnabled(has_project)
+        self.project_section_action.setText(
+            PROJECT_SECTION_LABEL_OPEN if has_project else PROJECT_SECTION_LABEL_CLOSED
+        )
