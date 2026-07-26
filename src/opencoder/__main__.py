@@ -1,14 +1,8 @@
 import sys
 
-from PySide6.QtWidgets import QApplication, QLabel, QMainWindow
+from PySide6.QtWidgets import QApplication
 
-
-class MainWindow(QMainWindow):
-    def __init__(self) -> None:
-        super().__init__()
-        self.setWindowTitle("OpenCoder")
-        self.resize(800, 600)
-        self.setCentralWidget(QLabel("OpenCoder — v1 scaffold"))
+from opencoder.ui.main_window import MainWindow
 
 
 def main() -> None:
