@@ -37,6 +37,40 @@ def test_import_document_populates_list_and_viewer(qtbot, tmp_path):
     assert window.viewer.toPlainText() == "Hello world."
 
 
+def test_import_document_duplicate_name_aborts_without_overwrite(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.create_project(tmp_path / "project.sqlite")
+
+    doc_path = tmp_path / "interview_01.txt"
+    doc_path.write_text("Original content.", encoding="utf-8")
+    window.import_document(doc_path)
+
+    doc_path.write_text("Changed content.", encoding="utf-8")
+    result = window.import_document(doc_path)
+
+    assert result is False
+    assert window.document_list.count() == 1
+    assert db.get_document(window.conn, 1).content == "Original content."
+
+
+def test_import_document_duplicate_name_overwrite_replaces_content(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.create_project(tmp_path / "project.sqlite")
+
+    doc_path = tmp_path / "interview_01.txt"
+    doc_path.write_text("Original content.", encoding="utf-8")
+    window.import_document(doc_path)
+
+    doc_path.write_text("Changed content.", encoding="utf-8")
+    result = window.import_document(doc_path, overwrite=True)
+
+    assert result is True
+    assert window.document_list.count() == 1
+    assert window.viewer.toPlainText() == "Changed content."
+
+
 def test_open_existing_project_loads_documents(qtbot, tmp_path):
     project_path = tmp_path / "existing.sqlite"
     conn = db.connect(project_path)

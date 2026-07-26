@@ -105,6 +105,18 @@ def list_documents(conn: sqlite3.Connection) -> list[Document]:
     return [Document(**row) for row in rows]
 
 
+def get_document_by_name(conn: sqlite3.Connection, name: str) -> Document | None:
+    row = conn.execute(
+        "SELECT * FROM documents WHERE name = ?", (name,)
+    ).fetchone()
+    return Document(**row) if row else None
+
+
+def delete_document(conn: sqlite3.Connection, document_id: int) -> None:
+    conn.execute("DELETE FROM documents WHERE id = ?", (document_id,))
+    conn.commit()
+
+
 def create_code(
     conn: sqlite3.Connection,
     name: str,

@@ -373,7 +373,21 @@ class MainWindow(QMainWindow):
         path_str, _ = QFileDialog.getOpenFileName(self, "Import Document", "", TEXT_FILTER)
         if not path_str:
             return
-        self.import_document(Path(path_str))
+        path = Path(path_str)
+        if self.conn is not None and db.get_document_by_name(self.conn, path.name) is not None:
+            reply = QMessageBox.question(
+                self,
+                "Document Already Imported",
+                f"A document named “{path.name}” has already been imported. "
+                "Overwrite it?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if reply != QMessageBox.Yes:
+                return
+            self.import_document(path, overwrite=True)
+            return
+        self.import_document(path)
 
     def _on_document_selected(
         self, current: QListWidgetItem | None, _previous: QListWidgetItem | None
@@ -590,19 +604,25 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("OpenCoder")
         self.statusBar().showMessage("No project open")
 
-    def import_document(self, path: Path) -> None:
+    def import_document(self, path: Path, *, overwrite: bool = False) -> bool:
         if self.conn is None:
-            return
+            return False
+        existing = db.get_document_by_name(self.conn, path.name)
+        if existing is not None and not overwrite:
+            return False
         try:
             content = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             QMessageBox.warning(
                 self, "Import Failed", f"Could not read {path.name} as UTF-8 text."
             )
-            return
+            return False
+        if existing is not None:
+            db.delete_document(self.conn, existing.id)
         doc = db.create_document(self.conn, path.name, content)
         self._refresh_documents()
         self._select_document(doc.id)
+        return True
 
     def add_code(self, name: str, parent_id: int | None = None, color: str | None = None) -> Code:
         if self.conn is None:
