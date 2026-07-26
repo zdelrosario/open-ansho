@@ -258,6 +258,10 @@ class MainWindow(QMainWindow):
                     self.code_filter_input.setFocus()
                     self.code_filter_input.selectAll()
                     return True
+            elif event.key() == Qt.Key_Escape:
+                if QApplication.focusWidget() is self.document_list:
+                    self.viewer.setFocus()
+                    return True
             elif event.key() in (Qt.Key_Up, Qt.Key_Down):
                 if (
                     not viewer_searching
