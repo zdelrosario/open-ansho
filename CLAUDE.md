@@ -17,6 +17,8 @@ pytest tests/test_db.py::test_create_code_and_list_codes   # run a single test
 
 There is no configured linter/formatter/type-checker in `pyproject.toml` — don't assume `ruff`/`black`/`mypy` are wired in.
 
+**Known hang: the full suite in Claude Code's sandbox.** Running the unscoped suite (bare `pytest`, or `pytest tests/`) reliably hangs in Claude Code's sandboxed/offscreen environment — the process gets stuck in an uninterruptible sleep that not even `kill -9` can clear, apparently a Qt/native-windowing issue with `tests/test_always_selected_code.py` specifically when it runs alongside the rest of the suite (it passes in well under a second in isolation, e.g. `pytest tests/test_always_selected_code.py`). `pytest tests/ --ignore=tests/test_always_selected_code.py` runs the rest of the suite (142 tests) in about a second. Claude Code should scope test runs (a single file, `--ignore` that file, or `-k`) rather than invoking the bare full suite. The human developer should still run the full suite occasionally outside this sandbox (a normal local terminal), since that's the only way to catch a regression in the one file this workaround always excludes.
+
 ## Architecture
 
 **Layering:** `db.py` → `reporting.py` → `ui/*`. The bottom two have zero Qt imports and operate directly on a `sqlite3.Connection`, so they're usable from tests (or a future CLI) without spinning up a `QApplication`.
