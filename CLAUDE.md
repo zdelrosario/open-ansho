@@ -6,6 +6,28 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 OpenAnsho is a desktop app (PySide6/Qt) for qualitative data analysis: importing text documents, tagging ("coding") spans of text with a hierarchical codebook, and exporting/reporting on the coded segments. Projects are single `.sqlite` files.
 
+## Development setup
+
+First-time setup, run once from the repo root:
+
+```bash
+python3 -m venv .venv           # create the project virtualenv
+source .venv/bin/activate       # activate it
+pip install -e ".[dev]"        # install package + dev deps (pytest, pytest-qt)
+```
+
+Every subsequent session, activate the virtualenv before running any commands below:
+
+```bash
+source .venv/bin/activate       # activate the project virtualenv
+```
+
+To run the development version of the app (with the virtualenv active):
+
+```bash
+python -m openansho              # run the app (or the `openansho` console script)
+```
+
 ## Commands
 
 The project uses a `.venv` virtualenv at the repo root — activate it before running any of the commands below.
