@@ -47,6 +47,10 @@ class VimTextViewer(QPlainTextEdit):
     currently visible in the viewport, L to the start of the last one,
     M to the start of the middle one.
 
+    f followed by any character jumps forward, within the current line,
+    to the next occurrence of that character (case-sensitive). Shift+F
+    does the same searching backward instead.
+
     Pressing / enters search mode: typed characters are interpreted as a
     Python regular expression and the cursor progressively jumps to the
     first match at or after the position search started from, updating
@@ -95,6 +99,7 @@ class VimTextViewer(QPlainTextEdit):
 
         self.mode = self.NORMAL
         self._pending_g = False
+        self._pending_find: int | None = None
         self._code_highlights: list[CodeHighlight] = []
         self._search_pattern = ""
         self._search_buffer = ""
@@ -124,6 +129,14 @@ class VimTextViewer(QPlainTextEdit):
         key = event.key()
         text = event.text()
         shift = bool(event.modifiers() & Qt.ShiftModifier)
+
+        if self._pending_find is not None:
+            direction = self._pending_find
+            self._pending_find = None
+            if key != Qt.Key_Escape and text:
+                self._find_char(text, direction)
+            event.accept()
+            return
 
         if key == Qt.Key_Escape:
             self._pending_g = False
@@ -200,6 +213,11 @@ class VimTextViewer(QPlainTextEdit):
 
         if key == Qt.Key_N:
             self._jump_to_search_match(-1 if shift else 1)
+            event.accept()
+            return
+
+        if key == Qt.Key_F:
+            self._pending_find = -1 if shift else 1
             event.accept()
             return
 
@@ -408,6 +426,25 @@ class VimTextViewer(QPlainTextEdit):
         starts = self._visible_line_starts()
         if starts:
             self._set_position(starts[len(starts) // 2])
+
+    def _find_char(self, char: str, direction: int) -> None:
+        """Handle the `f`/`F` motions: jump to the next/previous occurrence
+        of `char` on the current line (case-sensitive, vim never crosses
+        a line boundary for these).
+        """
+        cursor = self.textCursor()
+        block = cursor.block()
+        line_start = block.position()
+        line_text = block.text()
+        offset = cursor.position() - line_start
+
+        if direction > 0:
+            index = line_text.find(char, offset + 1)
+        else:
+            index = line_text.rfind(char, 0, offset)
+        if index == -1:
+            return
+        self._set_position(line_start + index)
 
     def _end_of_token_index(self, is_token_char) -> int | None:
         """String index of the last character of the current/next token.

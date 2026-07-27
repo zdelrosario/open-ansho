@@ -438,3 +438,73 @@ def test_uppercase_letter_in_pattern_does_not_match_lowercase(qtbot):
 
     assert not viewer.textCursor().hasSelection()
     assert viewer.textCursor().position() == 0
+
+
+def test_f_moves_cursor_forward_to_next_occurrence_of_char(qtbot):
+    viewer = _make_viewer(qtbot, "Hello frustrating world.")
+    viewer.setFocus()
+
+    QTest.keyClick(viewer, Qt.Key_F)
+    QTest.keyClicks(viewer, "w")
+
+    assert viewer.textCursor().position() == 18
+    assert not viewer.textCursor().hasSelection()
+
+
+def test_capital_f_moves_cursor_backward_to_previous_occurrence(qtbot):
+    viewer = _make_viewer(qtbot, "Hello frustrating world.")
+    viewer.setFocus()
+    cursor = viewer.textCursor()
+    cursor.setPosition(20)
+    viewer.setTextCursor(cursor)
+
+    QTest.keyClick(viewer, Qt.Key_F, Qt.ShiftModifier)
+    QTest.keyClicks(viewer, "r")
+
+    assert viewer.textCursor().position() == 11
+
+
+def test_f_does_not_cross_line_boundary(qtbot):
+    viewer = _make_viewer(qtbot, "Hello frustrating world.\nSecond line here.")
+    viewer.setFocus()
+
+    QTest.keyClick(viewer, Qt.Key_F)
+    QTest.keyClicks(viewer, "S")
+
+    assert viewer.textCursor().position() == 0
+    assert not viewer.textCursor().hasSelection()
+
+
+def test_f_is_case_sensitive(qtbot):
+    viewer = _make_viewer(qtbot, "Hello frustrating world.")
+    viewer.setFocus()
+
+    QTest.keyClick(viewer, Qt.Key_F)
+    QTest.keyClicks(viewer, "W")
+
+    assert viewer.textCursor().position() == 0
+    assert not viewer.textCursor().hasSelection()
+
+
+def test_f_with_no_match_does_not_move_cursor(qtbot):
+    viewer = _make_viewer(qtbot, "Hello frustrating world.")
+    viewer.setFocus()
+
+    QTest.keyClick(viewer, Qt.Key_F)
+    QTest.keyClicks(viewer, "z")
+
+    assert viewer.textCursor().position() == 0
+    assert not viewer.textCursor().hasSelection()
+
+
+def test_visual_mode_f_extends_selection(qtbot):
+    viewer = _make_viewer(qtbot, "Hello frustrating world.")
+    viewer.setFocus()
+
+    QTest.keyClick(viewer, Qt.Key_V)
+    QTest.keyClick(viewer, Qt.Key_F)
+    QTest.keyClicks(viewer, "w")
+
+    assert viewer.mode == VimTextViewer.VISUAL
+    assert viewer.textCursor().position() == 18
+    assert viewer.textCursor().selectionStart() == 0
