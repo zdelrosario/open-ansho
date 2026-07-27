@@ -13,7 +13,6 @@ SHORTCUT_SECTIONS = [
         "Anywhere",
         [
             ("Space", "Jump focus to the code filter"),
-            ("?", "Show this shortcuts popup"),
         ],
     ),
     (
@@ -24,7 +23,7 @@ SHORTCUT_SECTIONS = [
             ("x", "Delete segment(s) at the cursor, or in the visual selection"),
             ("c", "Jump to the next coded segment"),
             ("p", "Jump to the previous coded segment"),
-            ("h j k l", "Move left / down / up / right"),
+            ("h j k l", "Move left / down / up / right (arrow keys also work)"),
             ("w / b / e", "Move to next / previous / end of word"),
             ("W / B / E", "Move by WORD (whitespace-delimited)"),
             ("0 / $", "Move to start / end of line"),
@@ -33,6 +32,7 @@ SHORTCUT_SECTIONS = [
             ("v", "Toggle visual (selection) mode"),
             ("/", "Enter search mode (regex, smartcase)"),
             ("n / N", "Repeat last search forward / backward"),
+            ("?", "Show this shortcuts popup"),
             ("Esc", "Exit visual/search mode, or close this popup"),
         ],
     ),
@@ -42,6 +42,12 @@ SHORTCUT_SECTIONS = [
             ("Up / Down", "Cycle matched codes"),
             ("Enter", "Apply the matched code, or create a new code"),
             ("Esc", "Return focus to the text pane"),
+        ],
+    ),
+    (
+        "Document list",
+        [
+            ("Esc", "Move focus to the text pane"),
         ],
     ),
 ]

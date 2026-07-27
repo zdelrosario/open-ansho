@@ -36,3 +36,5 @@ There is no configured linter/formatter/type-checker in `pyproject.toml` — don
 **Focus styling:** panes are visually highlighted on focus via a Qt dynamic property (`"focused"`) toggled from `QApplication.focusChanged`, matched by the QSS in `PANE_FOCUS_STYLE` — not via per-widget `focusInEvent` overrides.
 
 **Coding workflow invariant:** applying a code always goes through `MainWindow.apply_segment`, which both writes the segment (`db.create_segment`) and refreshes the code tree/highlights/segment list in one place — don't call `db.create_segment` directly from UI code.
+
+**Keyboard shortcuts must stay documented.** `ui/shortcuts_dialog.py`'s `SHORTCUT_SECTIONS` is shown to the user via the `?` popup and is the single source of truth for "what keys does this app respond to." Any time a keyboard shortcut is added, changed, or removed anywhere in the UI (the global `eventFilter` in `main_window.py`, vim motions in `vim_viewer.py`, `code_filter_input.py`, `code_tree.py`, or any `QShortcut`/menu accelerator), update `SHORTCUT_SECTIONS` in the same change so the popup never drifts out of sync with actual behavior.
