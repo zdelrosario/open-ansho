@@ -304,6 +304,50 @@ def test_shift_c_jumps_to_previous_segment_and_wraps(qtbot, tmp_path):
     assert cursor.position() == 6
 
 
+def _check_user_filter(combo, data_value):
+    for i in range(combo.model().rowCount()):
+        item = combo.model().item(i)
+        if item.data() == data_value:
+            item.setCheckState(Qt.Checked)
+            return
+    raise AssertionError(f"no combo item with data {data_value!r}")
+
+
+def test_c_only_cycles_through_selected_users_segments(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    _open_project_with_document(window, tmp_path, "Hello frustrating world.")
+    greeting = window.add_code("Greeting")
+    frustration = window.add_code("Frustration")
+
+    window.username = "alice"
+    window.apply_segment(greeting.id, 0, 5)  # "Hello"
+    # bob's segment already exists in the shared project file, but bob isn't
+    # among the selected users by default (only the active user, alice, is).
+    db.create_segment(
+        window.conn, window._current_document_id, frustration.id, 6, 17, created_by="bob"
+    )
+    window._refresh_user_filter()
+
+    _place_cursor(window, 0)
+    window.viewer.setFocus()
+    qtbot.waitUntil(lambda: window.viewer.hasFocus())
+
+    QTest.keyClick(window.viewer, Qt.Key_C)
+    cursor = window.viewer.textCursor()
+    # Wraps back to alice's own (only) segment instead of jumping to bob's.
+    assert (cursor.selectionStart(), cursor.selectionEnd()) == (0, 5)
+
+    _check_user_filter(window.user_filter_combo, "bob")
+    _place_cursor(window, 0)
+
+    QTest.keyClick(window.viewer, Qt.Key_C)
+    cursor = window.viewer.textCursor()
+    # Now that bob is selected too, cycling reaches his segment.
+    assert (cursor.selectionStart(), cursor.selectionEnd()) == (6, 17)
+
+
 def test_c_and_shift_c_do_nothing_without_segments(qtbot, tmp_path):
     window = MainWindow()
     qtbot.addWidget(window)

@@ -989,11 +989,20 @@ class MainWindow(QMainWindow):
         self.viewer.ensureCursorVisible()
 
     def _adjacent_segment(self, direction: int):
-        """Segment before/after the cursor, wrapping around the document."""
+        """Segment before/after the cursor, wrapping around the document.
+
+        Only considers segments from the currently selected users, matching
+        the highlights/segment list/code counts elsewhere in the Coding pane.
+        """
         if self.conn is None or self._current_document_id is None:
             return None
+        selected_usernames = self._selected_usernames()
         segments = sorted(
-            db.list_segments_for_document(self.conn, self._current_document_id),
+            (
+                segment
+                for segment in db.list_segments_for_document(self.conn, self._current_document_id)
+                if (segment.created_by or "") in selected_usernames
+            ),
             key=lambda s: (s.start_offset, s.end_offset),
         )
         if not segments:
