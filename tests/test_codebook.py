@@ -1,6 +1,8 @@
+import pytest
 from PySide6.QtCore import Qt
 
-from opencoder.ui.main_window import MainWindow
+from opencoder import db
+from opencoder.ui.main_window import BASE_COLOR_CLASSES, MainWindow
 
 
 def _open_project_with_document(window, tmp_path, content="Hello frustrating world."):
@@ -38,6 +40,63 @@ def test_rename_code_updates_tree_label(qtbot, tmp_path):
 
     assert window.code_tree.topLevelItemCount() == 1
     assert window.code_tree.topLevelItem(0).text(0) == "Frustration"
+
+
+def test_set_code_base_color_assigns_chosen_class(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.create_project(tmp_path / "project.sqlite")
+
+    code = window.add_code("Emotions")
+    other_class = next(c for c in BASE_COLOR_CLASSES if c != code.color_class)
+
+    updated = window.set_code_base_color(code.id, other_class)
+
+    assert updated.color_class == other_class
+    assert updated.color == other_class
+
+
+def test_set_code_base_color_recolors_descendants(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.create_project(tmp_path / "project.sqlite")
+
+    parent = window.add_code("Emotions")
+    child = window.add_code("Frustration", parent_id=parent.id)
+    grandchild = window.add_code("Anger", parent_id=child.id)
+    other_class = next(c for c in BASE_COLOR_CLASSES if c != parent.color_class)
+
+    window.set_code_base_color(parent.id, other_class)
+
+    updated_child = db.get_code(window.conn, child.id)
+    updated_grandchild = db.get_code(window.conn, grandchild.id)
+    assert updated_child.color_class == other_class
+    assert updated_grandchild.color_class == other_class
+    assert updated_child.color != other_class  # lightened, not the raw base color
+    assert updated_grandchild.color != updated_child.color
+
+
+def test_set_code_base_color_rejects_child_codes(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.create_project(tmp_path / "project.sqlite")
+
+    parent = window.add_code("Emotions")
+    child = window.add_code("Frustration", parent_id=parent.id)
+
+    with pytest.raises(ValueError):
+        window.set_code_base_color(child.id, BASE_COLOR_CLASSES[0])
+
+
+def test_set_code_base_color_rejects_unknown_class(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.create_project(tmp_path / "project.sqlite")
+
+    code = window.add_code("Emotions")
+
+    with pytest.raises(ValueError):
+        window.set_code_base_color(code.id, "#123456")
 
 
 def test_delete_code_reparents_children_in_tree(qtbot, tmp_path):

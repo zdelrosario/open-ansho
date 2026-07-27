@@ -6,7 +6,7 @@ import sqlite3
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QSettings, Qt
-from PySide6.QtGui import QAction, QColor, QTextCharFormat, QTextCursor
+from PySide6.QtGui import QAction, QColor, QIcon, QPixmap, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -59,6 +59,14 @@ BASE_COLOR_CLASSES = [
     "#DE6E1C",
 ]
 
+BASE_COLOR_CLASS_NAMES = {
+    "#D81B60": "Pink",
+    "#1E88E5": "Blue",
+    "#FFC107": "Amber",
+    "#004D40": "Teal",
+    "#DE6E1C": "Orange",
+}
+
 # Fraction of the way to blend a child's color toward white, relative to its
 # parent's own shade, so nested codes read as progressively lighter tints of
 # the same base color class.
@@ -71,6 +79,12 @@ def _lighten_color(hex_color: str, factor: float = CHILD_COLOR_LIGHTEN_FACTOR) -
     g = base.green() + (255 - base.green()) * factor
     b = base.blue() + (255 - base.blue()) * factor
     return QColor(int(r), int(g), int(b)).name()
+
+
+def _color_swatch_icon(hex_color: str, size: int = 12) -> QIcon:
+    pixmap = QPixmap(size, size)
+    pixmap.fill(QColor(hex_color))
+    return QIcon(pixmap)
 
 
 HIGHLIGHT_ALPHA = 120
@@ -580,21 +594,36 @@ class MainWindow(QMainWindow):
         item = self.code_tree.itemAt(pos)
         if item is None:
             return
+        code_id = item.data(0, Qt.UserRole)
+        code = db.get_code(self.conn, code_id)
 
         menu = QMenu(self)
         new_child_action = menu.addAction("New Child Code…")
         rename_action = menu.addAction("Rename…")
+
+        color_menu = menu.addMenu("Assign Base Color")
+        color_menu.setEnabled(code is not None and code.parent_id is None)
+        color_actions = {}
+        for color_class in BASE_COLOR_CLASSES:
+            label = BASE_COLOR_CLASS_NAMES.get(color_class, color_class)
+            action = color_menu.addAction(_color_swatch_icon(color_class), label)
+            action.setCheckable(True)
+            action.setChecked(code is not None and code.color_class == color_class)
+            color_actions[action] = color_class
+
         delete_action = menu.addAction("Delete…")
 
         chosen = menu.exec(self.code_tree.viewport().mapToGlobal(pos))
         if chosen is None:
             return
         if chosen is new_child_action:
-            self._on_new_child_code(item.data(0, Qt.UserRole))
+            self._on_new_child_code(code_id)
         elif chosen is rename_action:
-            self._on_rename_code(item.data(0, Qt.UserRole), item.text(0))
+            self._on_rename_code(code_id, item.text(0))
+        elif chosen in color_actions:
+            self.set_code_base_color(code_id, color_actions[chosen])
         elif chosen is delete_action:
-            self._on_delete_code(item.data(0, Qt.UserRole), item.text(0))
+            self._on_delete_code(code_id, item.text(0))
 
     def _on_new_child_code(self, parent_id: int) -> None:
         name, ok = QInputDialog.getText(self, "New Child Code", "Code name:")
@@ -818,7 +847,26 @@ class MainWindow(QMainWindow):
         parent = db.get_code(self.conn, parent_id) if parent_id is not None else None
         color_class, color = self._color_for_parent(parent)
         code = db.set_code_color(self.conn, code_id, color, color_class)
+        self._recolor_descendants(code_id, color_class, color)
+        return code
 
+    def set_code_base_color(self, code_id: int, color_class: str) -> Code:
+        if self.conn is None:
+            raise RuntimeError("No project open")
+        if color_class not in BASE_COLOR_CLASSES:
+            raise ValueError(f"Unknown base color class: {color_class}")
+        target = db.get_code(self.conn, code_id)
+        if target is None:
+            raise RuntimeError("Code not found")
+        if target.parent_id is not None:
+            raise ValueError("Only root codes can be assigned a base color class.")
+        code = db.set_code_color(self.conn, code_id, color_class, color_class)
+        self._recolor_descendants(code_id, color_class, color_class)
+        self._refresh_codes()
+        self._refresh_highlights()
+        return code
+
+    def _recolor_descendants(self, code_id: int, color_class: str, color: str) -> None:
         children_by_parent: dict[int, list[Code]] = {}
         for other in db.list_codes(self.conn):
             if other.parent_id is not None:
@@ -831,7 +879,6 @@ class MainWindow(QMainWindow):
                 recolor_children(child.id, child_color)
 
         recolor_children(code_id, color)
-        return code
 
     def delete_code(self, code_id: int) -> None:
         if self.conn is None:
