@@ -78,6 +78,24 @@ def test_switching_documents_refreshes_highlights(qtbot, tmp_path):
     assert len(window.viewer.extraSelections()) == 2
 
 
+def test_segment_at_viewer_cursor_prefers_shortest_overlap(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    _open_project_with_document(window, tmp_path, content="Hello frustrating world.")
+
+    outer = window.add_code("Outer")
+    inner = window.add_code("Inner")
+    window.apply_segment(outer.id, 0, 24)  # "Hello frustrating world"
+    window.apply_segment(inner.id, 6, 16)  # "frustrating"
+
+    cursor = window.viewer.textCursor()
+    cursor.setPosition(8)
+    window.viewer.setTextCursor(cursor)
+
+    segment = window._segment_at_viewer_cursor()
+    assert segment.code_id == inner.id
+
+
 def test_apply_code_button_noop_without_selection(qtbot, tmp_path, monkeypatch):
     window = MainWindow()
     qtbot.addWidget(window)

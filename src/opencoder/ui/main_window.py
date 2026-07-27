@@ -1030,10 +1030,14 @@ class MainWindow(QMainWindow):
         if self.conn is None or self._current_document_id is None:
             return None
         position = self.viewer.textCursor().position()
-        for segment in db.list_segments_for_document(self.conn, self._current_document_id):
-            if segment.start_offset <= position < segment.end_offset:
-                return segment
-        return None
+        overlapping = [
+            segment
+            for segment in db.list_segments_for_document(self.conn, self._current_document_id)
+            if segment.start_offset <= position < segment.end_offset
+        ]
+        if not overlapping:
+            return None
+        return min(overlapping, key=lambda s: s.end_offset - s.start_offset)
 
     def _on_viewer_cursor_moved(self) -> None:
         if QApplication.focusWidget() is self.viewer:
