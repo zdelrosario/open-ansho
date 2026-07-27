@@ -7,3 +7,4 @@ build/
 dist/
 *.sqlite
 *.sqlite3
+planning
