@@ -284,6 +284,14 @@ class MainWindow(QMainWindow):
 
     def eventFilter(self, watched, event) -> bool:
         if event.type() == QEvent.KeyPress:
+            # While the viewer is awaiting the f/F target character, every global
+            # shortcut below must stand down for this one keypress so the
+            # character reaches VimTextViewer's own key handling intact, whatever
+            # key it happens to be (including keys like x/c/Enter that would
+            # otherwise be hijacked as coding shortcuts).
+            if QApplication.focusWidget() is self.viewer and self.viewer.awaiting_find_char:
+                return super().eventFilter(watched, event)
+
             # While the viewer is composing a search string, key presses that would
             # otherwise act on its (search-preview) selection must fall through to
             # VimTextViewer's own key handling instead, so typed text always reaches

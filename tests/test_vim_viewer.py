@@ -1,5 +1,5 @@
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QTextCursor
+from PySide6.QtCore import QEvent, Qt
+from PySide6.QtGui import QKeyEvent, QTextCursor
 from PySide6.QtTest import QTest
 
 from opencoder.ui.vim_viewer import VimTextViewer
@@ -483,6 +483,22 @@ def test_f_is_case_sensitive(qtbot):
     QTest.keyClicks(viewer, "W")
 
     assert viewer.textCursor().position() == 0
+    assert not viewer.textCursor().hasSelection()
+
+
+def test_f_capital_letter_search_survives_a_leading_bare_shift_keypress(qtbot):
+    # Qt delivers holding Shift as its own keypress (Key_Shift, no text)
+    # before the shifted letter arrives. That bare press must not consume
+    # the pending f/F state, or the real target character falls through to
+    # ordinary key handling instead of being searched for.
+    viewer = _make_viewer(qtbot, "Hello frustrating World.")
+    viewer.setFocus()
+
+    QTest.keyClick(viewer, Qt.Key_F)
+    viewer.keyPressEvent(QKeyEvent(QEvent.KeyPress, Qt.Key_Shift, Qt.ShiftModifier, ""))
+    viewer.keyPressEvent(QKeyEvent(QEvent.KeyPress, Qt.Key_W, Qt.ShiftModifier, "W"))
+
+    assert viewer.textCursor().position() == 18
     assert not viewer.textCursor().hasSelection()
 
 

@@ -112,6 +112,11 @@ class VimTextViewer(QPlainTextEdit):
         self._code_highlights = list(highlights)
         self.viewport().update()
 
+    @property
+    def awaiting_find_char(self) -> bool:
+        """True right after f/F, while the next keypress is still owed as its target char."""
+        return self._pending_find is not None
+
     def exit_visual_mode(self) -> None:
         if self.mode != self.VISUAL:
             return
@@ -131,6 +136,12 @@ class VimTextViewer(QPlainTextEdit):
         shift = bool(event.modifiers() & Qt.ShiftModifier)
 
         if self._pending_find is not None:
+            if key in (Qt.Key_Shift, Qt.Key_Control, Qt.Key_Alt, Qt.Key_Meta):
+                # A bare modifier press (e.g. Shift held down before "W" arrives)
+                # is delivered as its own keypress first; it must not consume
+                # the pending f/F state before the actual target character.
+                event.accept()
+                return
             direction = self._pending_find
             self._pending_find = None
             if key != Qt.Key_Escape and text:

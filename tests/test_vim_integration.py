@@ -495,3 +495,60 @@ def test_n_after_search_enters_visual_mode_so_enter_codes_the_match(qtbot, tmp_p
     assert segments[0].code_id == code.id
     assert (segments[0].start_offset, segments[0].end_offset) == (6, 17)
     assert window.viewer.mode == VimTextViewer.NORMAL
+
+
+def test_f_target_char_x_does_not_trigger_the_delete_segment_shortcut(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    content = "Hello frustrating world. Text here."
+    _open_project_with_document(window, tmp_path, content)
+    code = window.add_code("Frustration")
+    window.apply_segment(code.id, 6, 17)  # "frustrating"
+
+    _place_cursor(window, 10)  # inside the coded span
+    window.viewer.setFocus()
+    qtbot.waitUntil(lambda: window.viewer.hasFocus())
+
+    QTest.keyClick(window.viewer, Qt.Key_F)
+    QTest.keyClicks(window.viewer, "x")  # target char, not the delete-segment shortcut
+
+    assert window.viewer.textCursor().position() == content.index("x")
+    assert db.list_segments_for_document(window.conn, window._current_document_id) != []
+
+
+def test_f_target_char_space_does_not_shift_focus_to_code_filter(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    _open_project_with_document(window, tmp_path, "Hello frustrating world.")
+
+    _place_cursor(window, 0)
+    window.viewer.setFocus()
+    qtbot.waitUntil(lambda: window.viewer.hasFocus())
+
+    QTest.keyClick(window.viewer, Qt.Key_F)
+    QTest.keyClick(window.viewer, Qt.Key_Space)  # target char, not the code-filter shortcut
+
+    assert window.viewer.textCursor().position() == 5
+    assert window.viewer.hasFocus()
+
+
+def test_f_target_char_return_does_not_apply_a_code(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    _open_project_with_document(window, tmp_path, "Hello frustrating world.")
+    code = window.add_code("Frustration")
+
+    QTest.keyClick(window.viewer, Qt.Key_V)
+    for _ in range(4):
+        QTest.keyClick(window.viewer, Qt.Key_L)
+    window.viewer.setFocus()
+    qtbot.waitUntil(lambda: window.viewer.hasFocus())
+    window.code_tree.setCurrentItem(window._code_items_by_id[code.id])
+
+    QTest.keyClick(window.viewer, Qt.Key_F)
+    QTest.keyClick(window.viewer, Qt.Key_Return)  # target char, not the apply-code shortcut
+
+    assert db.list_segments_for_document(window.conn, window._current_document_id) == []
