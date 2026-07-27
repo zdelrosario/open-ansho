@@ -30,8 +30,8 @@ def test_root_codes_balance_across_base_color_classes(qtbot, tmp_path):
     qtbot.addWidget(window)
     window.create_project(tmp_path / "project.sqlite")
 
-    for name in "ABCDE":
-        window.add_code(name)
+    for i in range(len(BASE_COLOR_CLASSES)):
+        window.add_code(f"Code {i}")
 
     counts = db.count_codes_by_color_class(window.conn)
     assert counts == {color_class: 1 for color_class in BASE_COLOR_CLASSES}

@@ -6,7 +6,7 @@ import sqlite3
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QSettings, Qt
-from PySide6.QtGui import QAction, QColor, QIcon, QPixmap, QTextCharFormat, QTextCursor
+from PySide6.QtGui import QAction, QColor, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
+    QWidgetAction,
 )
 
 from opencoder import db, reporting, user
@@ -57,14 +58,16 @@ BASE_COLOR_CLASSES = [
     "#FFC107",
     "#004D40",
     "#DE6E1C",
+    "#A65BC0",
 ]
 
 BASE_COLOR_CLASS_NAMES = {
-    "#D81B60": "Pink",
+    "#D81B60": "Red",
     "#1E88E5": "Blue",
-    "#FFC107": "Amber",
-    "#004D40": "Teal",
+    "#FFC107": "Yellow",
+    "#004D40": "Green",
     "#DE6E1C": "Orange",
+    "#A65BC0": "Purple",
 }
 
 # Fraction of the way to blend a child's color toward white, relative to its
@@ -79,12 +82,6 @@ def _lighten_color(hex_color: str, factor: float = CHILD_COLOR_LIGHTEN_FACTOR) -
     g = base.green() + (255 - base.green()) * factor
     b = base.blue() + (255 - base.blue()) * factor
     return QColor(int(r), int(g), int(b)).name()
-
-
-def _color_swatch_icon(hex_color: str, size: int = 12) -> QIcon:
-    pixmap = QPixmap(size, size)
-    pixmap.fill(QColor(hex_color))
-    return QIcon(pixmap)
 
 
 HIGHLIGHT_ALPHA = 120
@@ -602,9 +599,21 @@ class MainWindow(QMainWindow):
         color_actions = {}
         for color_class in BASE_COLOR_CLASSES:
             label = BASE_COLOR_CLASS_NAMES.get(color_class, color_class)
-            action = color_menu.addAction(_color_swatch_icon(color_class), label)
+            is_current = code is not None and code.color_class == color_class
+            action = QWidgetAction(color_menu)
             action.setCheckable(True)
-            action.setChecked(code is not None and code.color_class == color_class)
+            action.setChecked(is_current)
+            button = QPushButton(("✓ " if is_current else "   ") + label, color_menu)
+            button.setFlat(True)
+            button.setStyleSheet(
+                f"QPushButton {{ color: {color_class}; text-align: left; padding: 4px 20px;"
+                f" border: none; background: transparent;"
+                f" font-weight: {'bold' if is_current else 'normal'}; }}"
+                "QPushButton:hover { background: rgba(128, 128, 128, 60); }"
+            )
+            button.clicked.connect(lambda checked=False, a=action: (a.trigger(), menu.close()))
+            action.setDefaultWidget(button)
+            color_menu.addAction(action)
             color_actions[action] = color_class
 
         delete_action = menu.addAction("Delete…")
