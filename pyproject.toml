@@ -20,6 +20,7 @@ dev = [
 ]
 build = [
     "pyinstaller>=6.0",
+    "pillow",
 ]
 
 [project.scripts]

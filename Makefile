@@ -7,6 +7,7 @@
 
 APP_NAME := OpenAnsho
 ENTRY_POINT := src/openansho/__main__.py
+ICON := images/kanji_shou_app_icon.png
 DIST_DIR := dist
 BUILD_DIR := build
 VENV := .venv
@@ -14,9 +15,11 @@ VENV := .venv
 ifeq ($(OS),Windows_NT)
     VENV_BIN := $(VENV)/Scripts
     SYSTEM_PYTHON := python
+    ADD_DATA := $(ICON);images
 else
     VENV_BIN := $(VENV)/bin
     SYSTEM_PYTHON := python3
+    ADD_DATA := $(ICON):images
 endif
 
 PYTHON := $(VENV_BIN)/python
@@ -61,16 +64,19 @@ clean:
 
 build-mac: install-build
 	$(PYINSTALLER) --name "$(APP_NAME)" --windowed --noconfirm --clean \
+		--icon $(ICON) --add-data "$(ADD_DATA)" \
 		--distpath $(DIST_DIR)/mac --workpath $(BUILD_DIR)/mac \
 		$(ENTRY_POINT)
 
 build-windows: install-build
 	$(PYINSTALLER) --name "$(APP_NAME)" --windowed --noconfirm --clean \
+		--icon $(ICON) --add-data "$(ADD_DATA)" \
 		--distpath $(DIST_DIR)/windows --workpath $(BUILD_DIR)/windows \
 		$(ENTRY_POINT)
 
 build-linux: install-build
 	$(PYINSTALLER) --name "$(APP_NAME)" --noconfirm --clean \
+		--add-data "$(ADD_DATA)" \
 		--distpath $(DIST_DIR)/linux --workpath $(BUILD_DIR)/linux \
 		$(ENTRY_POINT)
 
