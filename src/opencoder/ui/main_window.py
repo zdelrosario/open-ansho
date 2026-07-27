@@ -89,6 +89,7 @@ HIGHLIGHT_ALPHA = 120
 SNIPPET_MAX_LENGTH = 60
 TOOLTIP_MAX_WIDTH_PX = 400
 OTHER_DOCUMENT_TEXT_COLOR = QColor(150, 150, 150)
+CODE_NAME_TEXT_COLOR = QColor(255, 255, 255)
 
 CODE_SORT_ALPHABETICAL = "alphabetical"
 CODE_SORT_CURRENT_DOCUMENT = "current_document"
@@ -674,7 +675,10 @@ class MainWindow(QMainWindow):
         self.delete_code(code_id)
 
     def _on_segment_activated(self, item: QListWidgetItem) -> None:
-        document_id, start, end = item.data(Qt.UserRole)
+        data = item.data(Qt.UserRole)
+        if data is None:
+            return  # a group header in the multi-user grouped view, not a segment
+        document_id, start, end = data
         self._select_document(document_id)
         cursor = self.viewer.textCursor()
         cursor.setPosition(start)
@@ -1249,6 +1253,9 @@ class MainWindow(QMainWindow):
         return min(overlapping, key=lambda s: s.end_offset - s.start_offset)
 
     def _on_viewer_cursor_moved(self) -> None:
+        if len(self._selected_usernames()) > 1:
+            self._render_segments_panel()
+            return
         if QApplication.focusWidget() is self.viewer:
             segment = self._segment_at_viewer_cursor()
             if segment is not None:
@@ -1261,13 +1268,38 @@ class MainWindow(QMainWindow):
         self._segments_panel_code_id = code_id
         self._render_segments_panel()
 
+    def _segments_overlapping_viewer_selection(self) -> list[db.Segment]:
+        """Segments in the current document touching the viewer's cursor/selection."""
+        if self.conn is None or self._current_document_id is None:
+            return []
+        all_segments = db.list_segments_for_document(self.conn, self._current_document_id)
+        cursor = self.viewer.textCursor()
+        if cursor.hasSelection():
+            start, end = cursor.selectionStart(), cursor.selectionEnd()
+            return [s for s in all_segments if s.start_offset < end and start < s.end_offset]
+        position = cursor.position()
+        return [s for s in all_segments if s.start_offset <= position < s.end_offset]
+
     def _render_segments_panel(self) -> None:
         self.segment_list.clear()
-        code_id = self._segments_panel_code_id
-        code = None
-        if self.conn is not None and code_id is not None:
-            code = next((c for c in db.list_codes(self.conn) if c.id == code_id), None)
+        if self.conn is None:
+            self.segment_code_label.clear()
+            self.segment_code_label.setStyleSheet("")
+            return
 
+        selected_usernames = self._selected_usernames()
+        documents_by_id = {doc.id: doc for doc in db.list_documents(self.conn)}
+
+        if len(selected_usernames) > 1:
+            self._render_segments_panel_grouped_by_code(selected_usernames, documents_by_id)
+            return
+
+        code_id = self._segments_panel_code_id
+        code = (
+            next((c for c in db.list_codes(self.conn) if c.id == code_id), None)
+            if code_id is not None
+            else None
+        )
         if code is None:
             self.segment_code_label.clear()
             self.segment_code_label.setStyleSheet("")
@@ -1275,35 +1307,80 @@ class MainWindow(QMainWindow):
 
         self.segment_code_label.setText(code.name)
         self.segment_code_label.setStyleSheet(
-            f"background-color: {code.color}; border-radius: 3px;" if code.color else ""
+            f"background-color: {code.color}; color: {CODE_NAME_TEXT_COLOR.name()}; "
+            "border-radius: 3px;"
+            if code.color
+            else ""
         )
 
-        documents_by_id = {doc.id: doc for doc in db.list_documents(self.conn)}
-        selected_usernames = self._selected_usernames()
         segments = [
             segment
             for segment in db.list_segments_for_code(self.conn, code_id)
             if (segment.created_by or "") in selected_usernames
         ]
         segments.sort(key=lambda s: s.document_id != self._current_document_id)
-
         for segment in segments:
-            doc = documents_by_id.get(segment.document_id)
-            doc_name = doc.name if doc else "?"
-            username = segment.created_by or NO_USERNAME_TEXT
-            full_text = doc.content[segment.start_offset : segment.end_offset] if doc else ""
-            snippet = full_text
-            if len(snippet) > SNIPPET_MAX_LENGTH:
-                snippet = snippet[:SNIPPET_MAX_LENGTH] + "…"
+            self._add_segment_list_item(segment, documents_by_id)
 
-            list_item = QListWidgetItem(f"“{snippet}” [{doc_name}, {username}]")
-            list_item.setData(
-                Qt.UserRole, (segment.document_id, segment.start_offset, segment.end_offset)
+    def _render_segments_panel_grouped_by_code(
+        self, selected_usernames: set[str], documents_by_id: dict[int, db.Document]
+    ) -> None:
+        """Multi-user mode: only segments touching the viewer's cursor/selection,
+        grouped under a colored header per code instead of a single code context."""
+        self.segment_code_label.clear()
+        self.segment_code_label.setStyleSheet("")
+
+        segments = [
+            segment
+            for segment in self._segments_overlapping_viewer_selection()
+            if (segment.created_by or "") in selected_usernames
+        ]
+        if not segments:
+            return
+
+        codes_by_id = {code.id: code for code in db.list_codes(self.conn)}
+        segments_by_code: dict[int, list[db.Segment]] = {}
+        for segment in segments:
+            segments_by_code.setdefault(segment.code_id, []).append(segment)
+
+        def code_name(code_id: int) -> str:
+            code = codes_by_id.get(code_id)
+            return code.name if code else "?"
+
+        for code_id in sorted(segments_by_code, key=lambda cid: code_name(cid).lower()):
+            code = codes_by_id.get(code_id)
+            header_item = QListWidgetItem(code_name(code_id))
+            header_item.setFlags(Qt.NoItemFlags)
+            if code and code.color:
+                header_item.setBackground(QColor(code.color))
+                header_item.setForeground(CODE_NAME_TEXT_COLOR)
+            self.segment_list.addItem(header_item)
+
+            group_segments = sorted(
+                segments_by_code[code_id], key=lambda s: s.document_id != self._current_document_id
             )
-            list_item.setToolTip(_segment_tooltip(full_text, doc_name, username))
-            if segment.document_id != self._current_document_id:
-                list_item.setForeground(OTHER_DOCUMENT_TEXT_COLOR)
-            self.segment_list.addItem(list_item)
+            for segment in group_segments:
+                self._add_segment_list_item(segment, documents_by_id)
+
+    def _add_segment_list_item(
+        self, segment: db.Segment, documents_by_id: dict[int, db.Document]
+    ) -> None:
+        doc = documents_by_id.get(segment.document_id)
+        doc_name = doc.name if doc else "?"
+        username = segment.created_by or NO_USERNAME_TEXT
+        full_text = doc.content[segment.start_offset : segment.end_offset] if doc else ""
+        snippet = full_text
+        if len(snippet) > SNIPPET_MAX_LENGTH:
+            snippet = snippet[:SNIPPET_MAX_LENGTH] + "…"
+
+        list_item = QListWidgetItem(f"“{snippet}” [{doc_name}, {username}]")
+        list_item.setData(
+            Qt.UserRole, (segment.document_id, segment.start_offset, segment.end_offset)
+        )
+        list_item.setToolTip(_segment_tooltip(full_text, doc_name, username))
+        if segment.document_id != self._current_document_id:
+            list_item.setForeground(OTHER_DOCUMENT_TEXT_COLOR)
+        self.segment_list.addItem(list_item)
 
     def _apply_code_filter(self, text: str) -> None:
         query = text.strip().lower()
@@ -1375,6 +1452,7 @@ class MainWindow(QMainWindow):
             self._ensure_code_selected()
         else:
             self.code_tree.setCurrentItem(None)
+        self._on_viewer_cursor_moved()
 
     def _select_code(self, code_id: int) -> None:
         item = self._code_items_by_id.get(code_id)

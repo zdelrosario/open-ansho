@@ -1,4 +1,5 @@
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
 
 from opencoder import db, user
 from opencoder.ui.main_window import NO_USERNAME_TEXT, MainWindow
@@ -76,7 +77,13 @@ def test_user_filter_includes_placeholder_for_missing_username(qtbot, tmp_path):
     assert _checked_labels(window.user_filter_combo) == {NO_USERNAME_TEXT}
 
 
-def test_checking_another_user_adds_their_segments_to_the_list(qtbot, tmp_path):
+def _place_cursor(window, position):
+    cursor = window.viewer.textCursor()
+    cursor.setPosition(position)
+    window.viewer.setTextCursor(cursor)
+
+
+def test_single_user_segment_list_shows_all_of_that_codes_segments(qtbot, tmp_path):
     window = _setup_project_with_document(qtbot, tmp_path)
     code = window.add_code("Frustration")
 
@@ -88,9 +95,60 @@ def test_checking_another_user_adds_their_segments_to_the_list(qtbot, tmp_path):
     assert window.segment_list.count() == 1
     assert "alice" in window.segment_list.item(0).text()
 
+
+def test_multi_user_segment_list_only_shows_segments_overlapping_the_cursor(qtbot, tmp_path):
+    window = _setup_project_with_document(qtbot, tmp_path)
+    frustration = window.add_code("Frustration")
+    greeting = window.add_code("Greeting")
+
+    window.username = "alice"
+    window.apply_segment(frustration.id, 6, 17)  # "frustrating"
+    _add_existing_segment(window, greeting, 0, 5, "bob")  # "Hello", doesn't overlap
+
     _check(window.user_filter_combo, "bob")
 
-    assert window.segment_list.count() == 2
+    _place_cursor(window, 8)  # inside "frustrating" only
+    assert window.segment_list.count() == 2  # code header + alice's segment
+    assert window.segment_list.item(0).text() == "Frustration"
+    assert "alice" in window.segment_list.item(1).text()
+
+    _place_cursor(window, 2)  # inside "Hello" only
+    assert window.segment_list.count() == 2  # code header + bob's segment
+    assert window.segment_list.item(0).text() == "Greeting"
+    assert "bob" in window.segment_list.item(1).text()
+
+    _place_cursor(window, 22)  # inside "world.", coded by no one
+    assert window.segment_list.count() == 0
+
+
+def test_multi_user_segment_list_groups_overlapping_segments_by_code(qtbot, tmp_path):
+    window = _setup_project_with_document(qtbot, tmp_path)
+    frustration = window.add_code("Frustration")
+    setting = window.add_code("Setting")
+
+    window.username = "alice"
+    window.apply_segment(frustration.id, 6, 17)  # "frustrating"
+    _add_existing_segment(window, setting, 10, 20, "bob")  # overlaps, different code
+
+    _check(window.user_filter_combo, "bob")
+    _place_cursor(window, 12)  # inside both segments' ranges
+
+    # One non-selectable, colored header per code, each followed by its segment.
+    assert window.segment_list.count() == 4
+
+    frustration_header = window.segment_list.item(0)
+    assert frustration_header.text() == "Frustration"
+    assert frustration_header.flags() == Qt.NoItemFlags
+    assert frustration_header.background().color() == QColor(frustration.color)
+    assert frustration_header.foreground().color() == QColor(255, 255, 255)
+    assert "alice" in window.segment_list.item(1).text()
+
+    setting_header = window.segment_list.item(2)
+    assert setting_header.text() == "Setting"
+    assert setting_header.flags() == Qt.NoItemFlags
+    assert setting_header.background().color() == QColor(setting.color)
+    assert setting_header.foreground().color() == QColor(255, 255, 255)
+    assert "bob" in window.segment_list.item(3).text()
 
 
 def test_default_filter_only_highlights_the_active_users_segments(qtbot, tmp_path):
