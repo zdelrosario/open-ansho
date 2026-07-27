@@ -464,14 +464,14 @@ def test_capital_f_moves_cursor_backward_to_previous_occurrence(qtbot):
     assert viewer.textCursor().position() == 11
 
 
-def test_f_does_not_cross_line_boundary(qtbot):
+def test_f_crosses_line_boundary(qtbot):
     viewer = _make_viewer(qtbot, "Hello frustrating world.\nSecond line here.")
     viewer.setFocus()
 
     QTest.keyClick(viewer, Qt.Key_F)
     QTest.keyClicks(viewer, "S")
 
-    assert viewer.textCursor().position() == 0
+    assert viewer.textCursor().position() == 25
     assert not viewer.textCursor().hasSelection()
 
 

@@ -30,7 +30,7 @@ SHORTCUT_SECTIONS = [
             ("0 / $", "Move to start / end of line"),
             ("gg / G", "Jump to top / bottom of document"),
             ("H / L / M", "Jump to first / last / middle visible line in viewport"),
-            ("f<char> / F<char>", "Jump forward / backward to next occurrence of char on this line"),
+            ("f<char> / F<char>", "Jump forward / backward to next occurrence of char in document"),
             ("v", "Toggle visual (selection) mode"),
             ("/", "Enter search mode (regex, smartcase)"),
             ("n / N", "Repeat last search forward / backward"),

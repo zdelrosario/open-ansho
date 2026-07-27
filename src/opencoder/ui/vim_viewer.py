@@ -47,9 +47,9 @@ class VimTextViewer(QPlainTextEdit):
     currently visible in the viewport, L to the start of the last one,
     M to the start of the middle one.
 
-    f followed by any character jumps forward, within the current line,
-    to the next occurrence of that character (case-sensitive). Shift+F
-    does the same searching backward instead.
+    f followed by any character jumps forward to the next occurrence of
+    that character anywhere in the document (case-sensitive), crossing
+    line boundaries freely. Shift+F does the same searching backward.
 
     Pressing / enters search mode: typed characters are interpreted as a
     Python regular expression and the cursor progressively jumps to the
@@ -429,22 +429,19 @@ class VimTextViewer(QPlainTextEdit):
 
     def _find_char(self, char: str, direction: int) -> None:
         """Handle the `f`/`F` motions: jump to the next/previous occurrence
-        of `char` on the current line (case-sensitive, vim never crosses
-        a line boundary for these).
+        of `char` anywhere in the document (case-sensitive), crossing line
+        boundaries freely.
         """
-        cursor = self.textCursor()
-        block = cursor.block()
-        line_start = block.position()
-        line_text = block.text()
-        offset = cursor.position() - line_start
+        text = self.toPlainText()
+        position = self.textCursor().position()
 
         if direction > 0:
-            index = line_text.find(char, offset + 1)
+            index = text.find(char, position + 1)
         else:
-            index = line_text.rfind(char, 0, offset)
+            index = text.rfind(char, 0, position)
         if index == -1:
             return
-        self._set_position(line_start + index)
+        self._set_position(index)
 
     def _end_of_token_index(self, is_token_char) -> int | None:
         """String index of the last character of the current/next token.
