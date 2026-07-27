@@ -1,10 +1,28 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QPalette, QTextCharFormat, QTextCursor
+from PySide6.QtCore import QRect, QRectF, Qt, Signal
+from PySide6.QtGui import QColor, QPainter, QPalette, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import QPlainTextEdit, QTextEdit
+
+
+@dataclass(frozen=True)
+class CodeHighlight:
+    """One coded span to paint, plus its vertical band among selected users.
+
+    `band_index`/`band_count` divide the highlighted line height into
+    `band_count` equal horizontal stripes and pick stripe `band_index`
+    (0 = top), so segments from different users stack instead of
+    overlapping when more than one user is selected.
+    """
+
+    start: int
+    end: int
+    color: QColor
+    band_index: int
+    band_count: int
 
 
 class VimTextViewer(QPlainTextEdit):
@@ -69,7 +87,7 @@ class VimTextViewer(QPlainTextEdit):
 
         self.mode = self.NORMAL
         self._pending_g = False
-        self._code_highlights: list[QTextEdit.ExtraSelection] = []
+        self._code_highlights: list[CodeHighlight] = []
         self._search_pattern = ""
         self._search_buffer = ""
         self._search_origin = 0
@@ -77,9 +95,9 @@ class VimTextViewer(QPlainTextEdit):
         self.cursorPositionChanged.connect(self._refresh_extra_selections)
         self._refresh_extra_selections()
 
-    def set_code_highlights(self, selections: list[QTextEdit.ExtraSelection]) -> None:
-        self._code_highlights = list(selections)
-        self._refresh_extra_selections()
+    def set_code_highlights(self, highlights: list[CodeHighlight]) -> None:
+        self._code_highlights = list(highlights)
+        self.viewport().update()
 
     def exit_visual_mode(self) -> None:
         if self.mode != self.VISUAL:
@@ -438,10 +456,62 @@ class VimTextViewer(QPlainTextEdit):
     def _is_big_word_char(char: str) -> bool:
         return not char.isspace()
 
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self.viewport())
+        for highlight in self._code_highlights:
+            self._paint_code_highlight(painter, highlight)
+        painter.end()
+        super().paintEvent(event)
+
+    def _paint_code_highlight(self, painter: QPainter, highlight: CodeHighlight) -> None:
+        for rect in self._line_rects_for_range(highlight.start, highlight.end):
+            band_height = rect.height() / highlight.band_count
+            band_top = rect.top() + highlight.band_index * band_height
+            painter.fillRect(QRectF(rect.left(), band_top, rect.width(), band_height), highlight.color)
+
+    def _line_rects_for_range(self, start: int, end: int) -> list[QRect]:
+        """Viewport rects covering [start, end), one per visual line it spans.
+
+        Mirrors what a full-height ExtraSelection would cover, so callers
+        can subdivide each line's rect into per-user bands. Uses
+        `cursorRect()` (viewport coordinates) rather than QTextLayout
+        internals so soft-wrapped lines are handled the same as hard
+        paragraph breaks.
+        """
+        if end <= start:
+            return []
+
+        doc = self.document()
+        rects = []
+        pos = start
+        while pos < end:
+            line_end_cursor = QTextCursor(doc)
+            line_end_cursor.setPosition(pos)
+            line_end_cursor.movePosition(QTextCursor.EndOfLine)
+            hit_block_end = line_end_cursor.atBlockEnd()
+            line_end_pos = min(line_end_cursor.position(), end)
+
+            left_cursor = QTextCursor(doc)
+            left_cursor.setPosition(pos)
+            right_cursor = QTextCursor(doc)
+            right_cursor.setPosition(line_end_pos)
+
+            left_rect = self.cursorRect(left_cursor)
+            right_rect = self.cursorRect(right_cursor)
+            left = min(left_rect.left(), right_rect.left())
+            right = max(left_rect.left(), right_rect.left())
+            if right <= left:
+                right = left + 1
+            rects.append(QRect(left, left_rect.top(), right - left, left_rect.height()))
+
+            if line_end_pos >= end:
+                break
+            next_pos = line_end_pos + 1 if hit_block_end else line_end_pos
+            pos = next_pos if next_pos > pos else pos + 1
+        return rects
+
     def _refresh_extra_selections(self) -> None:
-        selections = list(self._code_highlights)
-        selections.append(self._cursor_highlight_selection())
-        super().setExtraSelections(selections)
+        super().setExtraSelections([self._cursor_highlight_selection()])
 
     def _cursor_highlight_selection(self) -> QTextEdit.ExtraSelection:
         block_cursor = QTextCursor(self.textCursor())

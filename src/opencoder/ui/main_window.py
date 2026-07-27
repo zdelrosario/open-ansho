@@ -6,7 +6,7 @@ import sqlite3
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QSettings, Qt
-from PySide6.QtGui import QAction, QColor, QTextCharFormat, QTextCursor
+from PySide6.QtGui import QAction, QColor, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -21,7 +21,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSplitter,
-    QTextEdit,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -36,7 +35,7 @@ from opencoder.ui.code_filter_input import CodeFilterLineEdit
 from opencoder.ui.code_tree import CodeTreeWidget
 from opencoder.ui.report_dialog import CodeFrequencyDialog, CodeUserFrequencyDialog
 from opencoder.ui.shortcuts_dialog import ShortcutsDialog
-from opencoder.ui.vim_viewer import VimTextViewer
+from opencoder.ui.vim_viewer import CodeHighlight, VimTextViewer
 
 PROJECT_FILTER = "OpenCoder Project (*.sqlite)"
 TEXT_FILTER = "Text Files (*.txt);;All Files (*)"
@@ -1174,25 +1173,30 @@ class MainWindow(QMainWindow):
             if (segment.created_by or "") in selected_usernames
         ]
 
-        selections = []
+        # Selected users each get a fixed horizontal band (alphabetical, first
+        # user on top) so their segments stack instead of overlapping when
+        # more than one user is selected.
+        ordered_usernames = sorted(selected_usernames)
+        band_index_by_username = {name: index for index, name in enumerate(ordered_usernames)}
+        band_count = max(len(ordered_usernames), 1)
+
+        highlights = []
         for segment in segments:
             code = codes_by_id.get(segment.code_id)
             color = QColor(code.color if code and code.color else "#ffff00")
             color.setAlpha(HIGHLIGHT_ALPHA)
 
-            cursor = QTextCursor(self.viewer.document())
-            cursor.setPosition(segment.start_offset)
-            cursor.setPosition(segment.end_offset, QTextCursor.KeepAnchor)
+            highlights.append(
+                CodeHighlight(
+                    start=segment.start_offset,
+                    end=segment.end_offset,
+                    color=color,
+                    band_index=band_index_by_username[segment.created_by or ""],
+                    band_count=band_count,
+                )
+            )
 
-            fmt = QTextCharFormat()
-            fmt.setBackground(color)
-
-            selection = QTextEdit.ExtraSelection()
-            selection.cursor = cursor
-            selection.format = fmt
-            selections.append(selection)
-
-        self.viewer.set_code_highlights(selections)
+        self.viewer.set_code_highlights(highlights)
 
     def _segment_at_viewer_cursor(self) -> db.Segment | None:
         if self.conn is None or self._current_document_id is None:

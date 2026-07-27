@@ -128,3 +128,57 @@ def _reopen(project_path):
     from opencoder import db
 
     return db.connect(project_path), project_path
+
+
+def test_highlight_bands_ranked_alphabetically_among_selected_users(qtbot, tmp_path):
+    window = _setup_project_with_document(qtbot, tmp_path)
+    code = window.add_code("Frustration")
+
+    window.username = "carol"
+    window.apply_segment(code.id, 6, 17)
+    window.username = "alice"
+    window.apply_segment(code.id, 0, 5)
+    window.username = "bob"
+    window.apply_segment(code.id, 18, 23)
+
+    # Match each highlight back to the username via its start offset.
+    starts_to_user = {6: "carol", 0: "alice", 18: "bob"}
+    by_user = {starts_to_user[h.start]: h for h in window.viewer._code_highlights}
+
+    assert by_user["alice"].band_index == 0
+    assert by_user["bob"].band_index == 1
+    assert by_user["carol"].band_index == 2
+    assert all(h.band_count == 3 for h in window.viewer._code_highlights)
+
+
+def test_highlight_band_count_shrinks_when_a_user_is_unchecked(qtbot, tmp_path):
+    window = _setup_project_with_document(qtbot, tmp_path)
+    code = window.add_code("Frustration")
+
+    window.username = "alice"
+    window.apply_segment(code.id, 0, 5)
+    window.username = "bob"
+    window.apply_segment(code.id, 6, 17)
+    window.username = "carol"
+    window.apply_segment(code.id, 18, 23)
+
+    _uncheck(window.user_filter_combo, "bob")
+
+    remaining = window.viewer._code_highlights
+    assert len(remaining) == 2
+    assert all(h.band_count == 2 for h in remaining)
+    starts_to_user = {0: "alice", 18: "carol"}
+    by_user = {starts_to_user[h.start]: h for h in remaining}
+    assert by_user["alice"].band_index == 0
+    assert by_user["carol"].band_index == 1
+
+
+def test_single_selected_user_gets_full_height_band(qtbot, tmp_path):
+    window = _setup_project_with_document(qtbot, tmp_path)
+    code = window.add_code("Frustration")
+    window.username = "alice"
+    window.apply_segment(code.id, 6, 17)
+
+    highlight = window.viewer._code_highlights[0]
+    assert highlight.band_index == 0
+    assert highlight.band_count == 1

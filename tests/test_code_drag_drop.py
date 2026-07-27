@@ -78,8 +78,8 @@ def test_reparent_code_updates_viewer_highlight_color(qtbot, tmp_path):
     moved = db.get_code(window.conn, frustration.id)
     highlight = window.viewer._code_highlights[0]
     expected = QColor(moved.color)
-    expected.setAlpha(highlight.format.background().color().alpha())
-    assert highlight.format.background().color() == expected
+    expected.setAlpha(highlight.color.alpha())
+    assert highlight.color == expected
 
 
 def test_reparent_code_to_none_reassigns_a_base_color_class(qtbot, tmp_path):

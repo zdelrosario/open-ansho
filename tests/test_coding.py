@@ -66,8 +66,10 @@ def test_apply_segment_creates_segment_and_highlight(qtbot, tmp_path):
     assert segments[0].start_offset == 6
     assert segments[0].end_offset == 16
 
-    # +1 for the vim viewer's own block-cursor highlight, always present.
-    assert len(window.viewer.extraSelections()) == 2
+    # Code highlights are painted separately (not via extraSelections), so
+    # extraSelections() only ever holds the vim viewer's block cursor.
+    assert len(window.viewer.extraSelections()) == 1
+    assert len(window.viewer._code_highlights) == 1
 
 
 def test_switching_documents_refreshes_highlights(qtbot, tmp_path):
@@ -82,16 +84,20 @@ def test_switching_documents_refreshes_highlights(qtbot, tmp_path):
 
     code = window.add_code("Frustration")
 
-    # +1 for the vim viewer's own block-cursor highlight, always present.
+    # Code highlights are painted separately (not via extraSelections), so
+    # extraSelections() only ever holds the vim viewer's block cursor.
     window.document_list.setCurrentRow(0)
     window.apply_segment(code.id, 13, 24)
-    assert len(window.viewer.extraSelections()) == 2
+    assert len(window.viewer.extraSelections()) == 1
+    assert len(window.viewer._code_highlights) == 1
 
     window.document_list.setCurrentRow(1)
     assert len(window.viewer.extraSelections()) == 1
+    assert len(window.viewer._code_highlights) == 0
 
     window.document_list.setCurrentRow(0)
-    assert len(window.viewer.extraSelections()) == 2
+    assert len(window.viewer.extraSelections()) == 1
+    assert len(window.viewer._code_highlights) == 1
 
 
 def test_segment_at_viewer_cursor_prefers_shortest_overlap(qtbot, tmp_path):

@@ -245,20 +245,20 @@ def test_visual_mode_preserves_an_existing_mouse_style_selection(qtbot):
 
 
 def test_code_highlights_and_cursor_block_coexist(qtbot):
-    from PySide6.QtGui import QTextCharFormat, QTextCursor
-    from PySide6.QtWidgets import QTextEdit
+    from PySide6.QtGui import QColor
+
+    from opencoder.ui.vim_viewer import CodeHighlight
 
     viewer = _make_viewer(qtbot)
-    code_cursor = QTextCursor(viewer.document())
-    code_cursor.setPosition(0)
-    code_cursor.setPosition(5, QTextCursor.KeepAnchor)
-    selection = QTextEdit.ExtraSelection()
-    selection.cursor = code_cursor
-    selection.format = QTextCharFormat()
+    viewer.set_code_highlights(
+        [CodeHighlight(start=0, end=5, color=QColor("#ffff00"), band_index=0, band_count=1)]
+    )
 
-    viewer.set_code_highlights([selection])
-
-    assert len(viewer.extraSelections()) == 2  # code highlight + cursor block
+    # Code highlights are painted separately, not via QPlainTextEdit's
+    # extraSelections mechanism, so only the vim block cursor lives there.
+    assert len(viewer.extraSelections()) == 1
+    assert viewer._code_highlights[0].start == 0
+    assert viewer._code_highlights[0].end == 5
 
 
 def test_shift_w_treats_attached_punctuation_as_part_of_the_word(qtbot):

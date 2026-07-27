@@ -139,11 +139,12 @@ def test_delete_code_removes_its_highlight_from_the_viewer(qtbot, tmp_path):
 
     code = window.add_code("Frustration")
     window.apply_segment(code.id, 6, 17)
-    assert len(window.viewer.extraSelections()) == 2  # highlight + block cursor
+    assert len(window.viewer._code_highlights) == 1
 
     window.delete_code(code.id)
 
-    assert len(window.viewer.extraSelections()) == 1  # just the block cursor now
+    assert len(window.viewer._code_highlights) == 0
+    assert len(window.viewer.extraSelections()) == 1  # just the block cursor
 
 
 def test_segment_list_populates_for_selected_code(qtbot, tmp_path):

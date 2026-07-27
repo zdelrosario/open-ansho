@@ -130,8 +130,10 @@ def test_code_highlights_survive_alongside_vim_cursor_after_apply(qtbot, tmp_pat
     code = window.add_code("Frustration")
     window.apply_segment(code.id, 6, 17)
 
-    # code highlight + vim cursor block should coexist
-    assert len(window.viewer.extraSelections()) == 2
+    # code highlight + vim cursor block should coexist; the code highlight is
+    # painted separately, so only the cursor block lives in extraSelections()
+    assert len(window.viewer.extraSelections()) == 1
+    assert len(window.viewer._code_highlights) == 1
 
 
 def _place_cursor(window, position):
