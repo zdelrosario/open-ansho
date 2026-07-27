@@ -196,7 +196,6 @@ class MainWindow(QMainWindow):
         self.code_filter_input.textChanged.connect(self._on_code_filter_changed)
         self.code_filter_input.returnPressed.connect(self._on_code_filter_return_pressed)
         self.code_filter_input.cyclePressed.connect(self._on_code_filter_cycle)
-        self.code_filter_input.escapePressed.connect(self._on_code_filter_escape)
 
         self.apply_code_button = QPushButton("Apply to Selection")
         self.apply_code_button.clicked.connect(self._on_apply_code)
@@ -298,7 +297,7 @@ class MainWindow(QMainWindow):
                     self.code_filter_input.selectAll()
                     return True
             elif event.key() == Qt.Key_Escape:
-                if QApplication.focusWidget() is self.document_list:
+                if QApplication.focusWidget() is not self.viewer:
                     self.viewer.setFocus()
                     return True
             elif event.key() in (Qt.Key_Up, Qt.Key_Down):
@@ -524,9 +523,6 @@ class MainWindow(QMainWindow):
         if current is not None:
             self._last_selected_code_id = current.data(0, Qt.UserRole)
         self._show_segments_for_code(current.data(0, Qt.UserRole) if current is not None else None)
-
-    def _on_code_filter_escape(self) -> None:
-        self.viewer.setFocus()
 
     def _on_code_sort_changed(self, index: int) -> None:
         self._code_sort_mode = self.code_sort_combo.itemData(index)

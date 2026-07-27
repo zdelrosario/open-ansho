@@ -13,6 +13,7 @@ SHORTCUT_SECTIONS = [
         "Anywhere",
         [
             ("Space", "Jump focus to the code filter"),
+            ("Esc", "Return focus to the text pane (from any other pane)"),
         ],
     ),
     (
@@ -41,13 +42,6 @@ SHORTCUT_SECTIONS = [
         [
             ("Up / Down", "Cycle matched codes"),
             ("Enter", "Apply the matched code, or create a new code"),
-            ("Esc", "Return focus to the text pane"),
-        ],
-    ),
-    (
-        "Document list",
-        [
-            ("Esc", "Move focus to the text pane"),
         ],
     ),
 ]
