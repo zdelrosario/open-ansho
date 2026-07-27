@@ -29,7 +29,7 @@ SHORTCUT_SECTIONS = [
             ("W / B / E", "Move by WORD (whitespace-delimited)"),
             ("0 / $", "Move to start / end of line"),
             ("gg / G", "Jump to top / bottom of document"),
-            ("H / L", "Jump to first / last visible line in viewport"),
+            ("H / L / M", "Jump to first / last / middle visible line in viewport"),
             ("v", "Toggle visual (selection) mode"),
             ("/", "Enter search mode (regex, smartcase)"),
             ("n / N", "Repeat last search forward / backward"),

@@ -42,9 +42,10 @@ class VimTextViewer(QPlainTextEdit):
     single unit, so punctuation around or inside a word never stops them
     (unlike lowercase w/b/e, which treat punctuation as its own word).
 
-    G/gg jump to the bottom/top of the whole document. Shift+H/L are
+    G/gg jump to the bottom/top of the whole document. Shift+H/L/M are
     viewport-relative instead: H jumps to the start of the first line
-    currently visible in the viewport, L to the start of the last one.
+    currently visible in the viewport, L to the start of the last one,
+    M to the start of the middle one.
 
     Pressing / enters search mode: typed characters are interpreted as a
     Python regular expression and the cursor progressively jumps to the
@@ -163,6 +164,11 @@ class VimTextViewer(QPlainTextEdit):
                 self._jump_to_last_visible_line()
             else:
                 self._move(QTextCursor.Right)
+            event.accept()
+            return
+
+        if key == Qt.Key_M and shift:
+            self._jump_to_middle_visible_line()
             event.accept()
             return
 
@@ -397,6 +403,11 @@ class VimTextViewer(QPlainTextEdit):
         starts = self._visible_line_starts()
         if starts:
             self._set_position(starts[-1])
+
+    def _jump_to_middle_visible_line(self) -> None:
+        starts = self._visible_line_starts()
+        if starts:
+            self._set_position(starts[len(starts) // 2])
 
     def _end_of_token_index(self, is_token_char) -> int | None:
         """String index of the last character of the current/next token.
