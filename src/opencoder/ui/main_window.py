@@ -102,13 +102,13 @@ CODE_SORT_OPTIONS = [
 
 PANE_FOCUS_STYLE = """
 QListWidget#documentPane, QPlainTextEdit#viewerPane,
-QWidget#codebookPane, QWidget#segmentsPane {
+QTreeWidget#codeTreePane, QListWidget#segmentListPane {
     border: 2px solid transparent;
 }
 QListWidget#documentPane[focused="true"],
 QPlainTextEdit#viewerPane[focused="true"],
-QWidget#codebookPane[focused="true"],
-QWidget#segmentsPane[focused="true"] {
+QTreeWidget#codeTreePane[focused="true"],
+QListWidget#segmentListPane[focused="true"] {
     border: 2px solid #3399ff;
 }
 """
@@ -174,6 +174,7 @@ class MainWindow(QMainWindow):
         self.code_tree.header().setStretchLastSection(False)
         self.code_tree.header().setSectionResizeMode(0, QHeaderView.Stretch)
         self.code_tree.header().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.code_tree.setObjectName("codeTreePane")
         self.code_tree.currentItemChanged.connect(self._on_code_selected)
         self.code_tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.code_tree.customContextMenuRequested.connect(self._on_code_context_menu)
@@ -201,6 +202,7 @@ class MainWindow(QMainWindow):
         self.segment_code_label.setMargin(4)
 
         self.segment_list = QListWidget()
+        self.segment_list.setObjectName("segmentListPane")
         self.segment_list.itemDoubleClicked.connect(self._on_segment_activated)
 
         code_panel = QWidget()
@@ -210,8 +212,6 @@ class MainWindow(QMainWindow):
         code_splitter = QSplitter(Qt.Vertical)
 
         tree_container = QWidget()
-        tree_container.setObjectName("codebookPane")
-        self.codebook_pane = tree_container
         tree_layout = QVBoxLayout(tree_container)
         tree_layout.setContentsMargins(0, 0, 0, 0)
         tree_layout.addWidget(QLabel("Codebook"))
@@ -222,8 +222,6 @@ class MainWindow(QMainWindow):
         code_splitter.addWidget(tree_container)
 
         segments_container = QWidget()
-        segments_container.setObjectName("segmentsPane")
-        self.segments_pane = segments_container
         segments_layout = QVBoxLayout(segments_container)
         segments_layout.setContentsMargins(0, 0, 0, 0)
         segments_layout.addWidget(QLabel("Coded Segments"))
@@ -261,7 +259,7 @@ class MainWindow(QMainWindow):
         self.statusBar().addPermanentWidget(self.search_label)
 
         self.setStyleSheet(PANE_FOCUS_STYLE)
-        self._panes = (self.document_list, self.viewer, self.codebook_pane, self.segments_pane)
+        self._panes = (self.document_list, self.viewer, self.code_tree, self.segment_list)
 
         QApplication.instance().installEventFilter(self)
         QApplication.instance().focusChanged.connect(self._on_focus_changed)
