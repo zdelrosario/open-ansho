@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor
+from PySide6.QtGui import QColor, QPalette, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import QPlainTextEdit, QTextEdit
 
 
@@ -58,6 +58,14 @@ class VimTextViewer(QPlainTextEdit):
         super().__init__(parent)
         self.setReadOnly(True)
         self.setCursorWidth(0)  # we render our own block cursor instead
+
+        # Visual-mode selection uses Qt's native text-selection rendering
+        # (QPalette::Highlight/HighlightedText), which defaults to a blue
+        # background with white text on most platforms.
+        palette = self.palette()
+        palette.setColor(QPalette.Highlight, QColor(255, 255, 255))
+        palette.setColor(QPalette.HighlightedText, QColor(0, 0, 0))
+        self.setPalette(palette)
 
         self.mode = self.NORMAL
         self._pending_g = False
@@ -448,7 +456,7 @@ class VimTextViewer(QPlainTextEdit):
             block_cursor.movePosition(QTextCursor.NextCharacter, QTextCursor.KeepAnchor)
 
         fmt = QTextCharFormat()
-        fmt.setBackground(QColor(200, 200, 200))
+        fmt.setBackground(QColor(255, 255, 255))
         fmt.setForeground(QColor(0, 0, 0))
 
         selection = QTextEdit.ExtraSelection()
