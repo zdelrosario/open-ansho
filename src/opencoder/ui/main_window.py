@@ -1259,11 +1259,13 @@ class MainWindow(QMainWindow):
     def _segment_at_viewer_cursor(self) -> db.Segment | None:
         if self.conn is None or self._current_document_id is None:
             return None
+        selected_usernames = self._selected_usernames()
         position = self.viewer.textCursor().position()
         overlapping = [
             segment
             for segment in db.list_segments_for_document(self.conn, self._current_document_id)
             if segment.start_offset <= position < segment.end_offset
+            and (segment.created_by or "") in selected_usernames
         ]
         if not overlapping:
             return None

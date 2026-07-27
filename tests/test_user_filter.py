@@ -96,6 +96,26 @@ def test_single_user_segment_list_shows_all_of_that_codes_segments(qtbot, tmp_pa
     assert "alice" in window.segment_list.item(0).text()
 
 
+def test_single_user_cursor_in_other_users_segment_does_not_affect_panel(qtbot, tmp_path):
+    window = _setup_project_with_document(qtbot, tmp_path)
+    frustration = window.add_code("Frustration")
+    greeting = window.add_code("Greeting")
+
+    window.username = "alice"
+    window.apply_segment(frustration.id, 6, 17)  # "frustrating"
+    _add_existing_segment(window, greeting, 0, 5, "bob")  # "Hello"
+
+    window.code_tree.setCurrentItem(window.code_tree.topLevelItem(0))
+    assert window.segment_code_label.text() == "Frustration"
+
+    window.viewer.setFocus()
+    _place_cursor(window, 2)  # inside bob's "Hello" segment, alice is the only active user
+
+    assert window.segment_code_label.text() == "Frustration"
+    assert window.segment_list.count() == 1
+    assert "alice" in window.segment_list.item(0).text()
+
+
 def test_multi_user_segment_list_only_shows_segments_overlapping_the_cursor(qtbot, tmp_path):
     window = _setup_project_with_document(qtbot, tmp_path)
     frustration = window.add_code("Frustration")
