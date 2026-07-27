@@ -183,8 +183,7 @@ class MainWindow(QMainWindow):
         self._code_items_by_id: dict[int, QTreeWidgetItem] = {}
         self._last_selected_code_id: int | None = None
         self._segments_panel_code_id: int | None = None
-        self._known_usernames: list[str] = []
-        self._user_filter_initialized = False
+        self._user_filter_overrides: dict[str, bool] = {}
 
         self.code_sort_combo = QComboBox()
         for value, label in CODE_SORT_OPTIONS:
@@ -455,6 +454,7 @@ class MainWindow(QMainWindow):
         if existing:
             self.username = existing
             self._update_username_label()
+            self._apply_active_user_default_filter()
             return existing
         name, ok = QInputDialog.getText(self, "Username", "Enter your username:")
         name = name.strip() if ok else ""
@@ -463,7 +463,21 @@ class MainWindow(QMainWindow):
         user.write_username(path, name)
         self.username = name
         self._update_username_label()
+        self._apply_active_user_default_filter()
         return name
+
+    def _apply_active_user_default_filter(self) -> None:
+        """Re-derive the user filter's defaults now that `self.username` is known.
+
+        `_set_connection` populates the filter before the active username is
+        established (it's read from a sidecar file after the connection is
+        opened), so its "select only the active user" default can't take
+        effect until this runs.
+        """
+        self._refresh_user_filter()
+        self._refresh_codes()
+        self._refresh_highlights()
+        self._render_segments_panel()
 
     def _update_username_label(self) -> None:
         self.username_label.setText(self.username or NO_USERNAME_TEXT)
@@ -997,7 +1011,7 @@ class MainWindow(QMainWindow):
         self.username = None
         self._update_username_label()
         self._current_document_id = None
-        self._user_filter_initialized = False
+        self._user_filter_overrides = {}
         self.setWindowTitle(f"OpenCoder — {path.name}")
         self.statusBar().showMessage(str(path))
         self._refresh_documents()
@@ -1056,18 +1070,23 @@ class MainWindow(QMainWindow):
         return set(self.user_filter_combo.currentData())
 
     def _on_user_filter_changed(self) -> None:
+        combo = self.user_filter_combo
+        self._user_filter_overrides = {
+            combo.model().item(i).data(): combo.model().item(i).checkState() == Qt.Checked
+            for i in range(combo.model().rowCount())
+        }
         self._refresh_codes()
         self._refresh_highlights()
         self._render_segments_panel()
 
     def _refresh_user_filter(self) -> None:
+        """Repopulate the user filter from the project's coded segments.
+
+        Defaults to only the active user (`self.username`) selected; any
+        username the user has explicitly checked/unchecked this session
+        (`_user_filter_overrides`) keeps that state instead.
+        """
         combo = self.user_filter_combo
-        previous_checked = {
-            combo.model().item(i).data()
-            for i in range(combo.model().rowCount())
-            if combo.model().item(i).checkState() == Qt.Checked
-        }
-        previously_known = set(self._known_usernames)
 
         if self.conn is None:
             usernames: list[str] = []
@@ -1077,21 +1096,15 @@ class MainWindow(QMainWindow):
             has_no_username = any(not name for name in raw_usernames)
             usernames = real_names + ([""] if has_no_username else [])
 
+        active_username = self.username or ""
         combo.blockSignals(True)
         combo.clear()
         for value in usernames:
             label = value if value else NO_USERNAME_TEXT
-            should_check = (
-                not self._user_filter_initialized
-                or value in previous_checked
-                or value not in previously_known
-            )
-            combo.addItem(label, value, checked=should_check)
+            checked = self._user_filter_overrides.get(value, value == active_username)
+            combo.addItem(label, value, checked=checked)
         combo.blockSignals(False)
         combo.updateText()
-
-        self._known_usernames = usernames
-        self._user_filter_initialized = True
 
     def _filtered_segments_by_code(self, document_id: int | None = None) -> dict[int, int]:
         """Map code_id -> number of segments coded by a currently-selected user."""
