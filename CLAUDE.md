@@ -8,7 +8,10 @@ OpenCoder is a desktop app (PySide6/Qt) for qualitative data analysis: importing
 
 ## Commands
 
+The project uses a `.venv` virtualenv at the repo root — activate it before running any of the commands below.
+
 ```bash
+source .venv/bin/activate       # activate the project virtualenv
 pip install -e ".[dev]"        # install package + dev deps (pytest, pytest-qt)
 python -m opencoder             # run the app (or the `opencoder` console script)
 pytest                          # run the full test suite
