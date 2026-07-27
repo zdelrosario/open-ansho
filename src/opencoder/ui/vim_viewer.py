@@ -73,15 +73,17 @@ class VimTextViewer(QPlainTextEdit):
 
     # Keyed by key code (not text) so Shift-based case doesn't matter here;
     # shifted letters (W/B/E, G) are disambiguated via the Shift modifier.
+    #
+    # j/k and 0/$ are deliberately *not* here: Qt's QTextCursor.Down/Up and
+    # Start/EndOfLine move by visual (soft-wrapped) line, but vim's plain
+    # j/k/0/$ move by logical line regardless of wrapping (that's what
+    # gj/gk are for in real vim) — see _move_down_line/_move_up_line/
+    # _move_to_line_start/_move_to_line_end. Using the visual-line ops here
+    # made these motions' behavior depend on widget width and font metrics,
+    # which differed enough across platforms to flip test outcomes in CI.
     _MOTION_KEYS = {
-        Qt.Key_J: QTextCursor.Down,
-        Qt.Key_K: QTextCursor.Up,
         Qt.Key_Left: QTextCursor.Left,  # alias, doesn't conflict with code-cycling (Up/Down only)
         Qt.Key_Right: QTextCursor.Right,
-    }
-    _SYMBOL_MOTIONS = {
-        "0": QTextCursor.StartOfLine,
-        "$": QTextCursor.EndOfLine,
     }
 
     def __init__(self, parent=None) -> None:
@@ -232,7 +234,27 @@ class VimTextViewer(QPlainTextEdit):
             event.accept()
             return
 
-        operation = self._MOTION_KEYS.get(key, self._SYMBOL_MOTIONS.get(text))
+        if key == Qt.Key_J:
+            self._move_down_line()
+            event.accept()
+            return
+
+        if key == Qt.Key_K:
+            self._move_up_line()
+            event.accept()
+            return
+
+        if key == Qt.Key_Dollar:
+            self._move_to_line_end()
+            event.accept()
+            return
+
+        if text == "0":
+            self._move_to_line_start()
+            event.accept()
+            return
+
+        operation = self._MOTION_KEYS.get(key)
         if operation is not None:
             self._move(operation)
             event.accept()
@@ -374,6 +396,31 @@ class VimTextViewer(QPlainTextEdit):
         move_mode = QTextCursor.KeepAnchor if self.mode == self.VISUAL else QTextCursor.MoveAnchor
         cursor.movePosition(operation, move_mode)
         self.setTextCursor(cursor)
+
+    def _move_to_line_start(self) -> None:
+        self._set_position(self.textCursor().block().position())
+
+    def _move_to_line_end(self) -> None:
+        block = self.textCursor().block()
+        self._set_position(block.position() + len(block.text()))
+
+    def _move_down_line(self) -> None:
+        cursor = self.textCursor()
+        block = cursor.block()
+        next_block = block.next()
+        if not next_block.isValid():
+            return
+        column = cursor.position() - block.position()
+        self._set_position(next_block.position() + min(column, len(next_block.text())))
+
+    def _move_up_line(self) -> None:
+        cursor = self.textCursor()
+        block = cursor.block()
+        previous_block = block.previous()
+        if not previous_block.isValid():
+            return
+        column = cursor.position() - block.position()
+        self._set_position(previous_block.position() + min(column, len(previous_block.text())))
 
     def _move_to_word_end(self, is_token_char) -> None:
         """Handle the `e`/`E` motions.
