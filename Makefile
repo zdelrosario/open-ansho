@@ -22,14 +22,16 @@ endif
 PYTHON := $(VENV_BIN)/python
 PIP := $(VENV_BIN)/pip
 PYINSTALLER := $(VENV_BIN)/pyinstaller
+PYTEST := $(VENV_BIN)/pytest
 
-.PHONY: help venv install install-build clean build build-mac build-windows build-linux
+.PHONY: help venv install install-build test clean build build-mac build-windows build-linux
 
 help:
 	@echo "Targets:"
 	@echo "  venv           Create the virtualenv at $(VENV)"
 	@echo "  install        Install the package with dev dependencies"
 	@echo "  install-build  Install PyInstaller into the virtualenv"
+	@echo "  test           Run the full test suite"
 	@echo "  build-mac      Build a macOS .app bundle (must run on macOS)"
 	@echo "  build-windows  Build a Windows .exe (must run on Windows)"
 	@echo "  build-linux    Build a Linux binary (must run on Linux)"
@@ -46,6 +48,11 @@ install: venv
 
 install-build: venv
 	$(PIP) install -e ".[build]"
+
+# Note: the full suite is known to hang in Claude Code's sandboxed/offscreen
+# environment (see CLAUDE.md) — this target is meant for a real terminal or CI.
+test: install
+	$(PYTEST)
 
 clean:
 	rm -rf $(BUILD_DIR) $(DIST_DIR) *.spec
