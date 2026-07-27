@@ -478,10 +478,13 @@ class VimTextViewer(QPlainTextEdit):
 
             painter.fillRect(band_rect, highlight.color)
             if highlight.outlined:
+                # Outline the full coded-text rect (not the smaller per-user
+                # band) so the border marks the original text, not just this
+                # user's stripe of it.
                 pen = QPen(CONFLICT_OUTLINE_COLOR)
                 pen.setWidth(CONFLICT_OUTLINE_WIDTH)
                 painter.setPen(pen)
-                painter.drawRect(band_rect)
+                painter.drawRect(rect)
                 painter.setPen(Qt.NoPen)
 
     def _line_rects_for_range(self, start: int, end: int) -> list[QRect]:

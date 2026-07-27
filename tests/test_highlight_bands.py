@@ -106,7 +106,7 @@ def test_paint_code_highlight_outlines_a_conflicting_segment(qtbot, monkeypatch)
 
     assert len(painter.strokes) == 1
     rect, pen = painter.strokes[0]
-    assert rect == QRectF(10, 100, 40, 10)  # same band rect that got filled
+    assert rect == fixed_rect  # full-height text rect, not the smaller band rect
     assert pen.color() == CONFLICT_OUTLINE_COLOR
 
 
