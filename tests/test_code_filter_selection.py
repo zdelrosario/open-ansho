@@ -1,8 +1,8 @@
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
 
-from opencoder import db
-from opencoder.ui.main_window import MainWindow
+from openansho import db
+from openansho.ui.main_window import MainWindow
 
 
 def test_typing_highlights_the_single_match(qtbot, tmp_path):

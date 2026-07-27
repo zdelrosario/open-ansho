@@ -2,9 +2,9 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QTextCursor
 from PySide6.QtTest import QTest
 
-from opencoder import db
-from opencoder.ui.main_window import MainWindow
-from opencoder.ui.vim_viewer import VimTextViewer
+from openansho import db
+from openansho.ui.main_window import MainWindow
+from openansho.ui.vim_viewer import VimTextViewer
 
 
 def _open_project_with_document(window, tmp_path, content="Hello frustrating world."):

@@ -1,5 +1,5 @@
-from opencoder import db, user
-from opencoder.ui.main_window import NO_USERNAME_TEXT, MainWindow
+from openansho import db, user
+from openansho.ui.main_window import NO_USERNAME_TEXT, MainWindow
 
 
 def test_read_username_missing_file_returns_none(tmp_path):
@@ -17,7 +17,7 @@ def test_username_file_lives_next_to_project(tmp_path):
     project_path = tmp_path / "subdir" / "project.sqlite"
     project_path.parent.mkdir()
     user.write_username(project_path, "alice")
-    assert (project_path.parent / ".opencoder_user").exists()
+    assert (project_path.parent / ".openansho_user").exists()
 
 
 def test_ensure_username_prompts_when_no_sidecar_file(qtbot, tmp_path, monkeypatch):
@@ -27,7 +27,7 @@ def test_ensure_username_prompts_when_no_sidecar_file(qtbot, tmp_path, monkeypat
     window.create_project(project_path)
 
     monkeypatch.setattr(
-        "opencoder.ui.main_window.QInputDialog.getText",
+        "openansho.ui.main_window.QInputDialog.getText",
         lambda *args, **kwargs: ("alice", True),
     )
 
@@ -48,7 +48,7 @@ def test_ensure_username_reuses_stored_name_without_prompting(qtbot, tmp_path, m
     def fail_if_called(*args, **kwargs):
         raise AssertionError("should not prompt when a username is already stored")
 
-    monkeypatch.setattr("opencoder.ui.main_window.QInputDialog.getText", fail_if_called)
+    monkeypatch.setattr("openansho.ui.main_window.QInputDialog.getText", fail_if_called)
 
     result = window._ensure_username(project_path)
 
@@ -63,7 +63,7 @@ def test_ensure_username_cancel_leaves_username_unset(qtbot, tmp_path, monkeypat
     window.create_project(project_path)
 
     monkeypatch.setattr(
-        "opencoder.ui.main_window.QInputDialog.getText",
+        "openansho.ui.main_window.QInputDialog.getText",
         lambda *args, **kwargs: ("", False),
     )
 
@@ -80,7 +80,7 @@ def test_apply_segment_records_current_username(qtbot, tmp_path, monkeypatch):
     project_path = tmp_path / "project.sqlite"
     window.create_project(project_path)
     monkeypatch.setattr(
-        "opencoder.ui.main_window.QInputDialog.getText",
+        "openansho.ui.main_window.QInputDialog.getText",
         lambda *args, **kwargs: ("alice", True),
     )
     window._ensure_username(project_path)
@@ -103,7 +103,7 @@ def test_segment_list_shows_document_name_and_username(qtbot, tmp_path, monkeypa
     project_path = tmp_path / "project.sqlite"
     window.create_project(project_path)
     monkeypatch.setattr(
-        "opencoder.ui.main_window.QInputDialog.getText",
+        "openansho.ui.main_window.QInputDialog.getText",
         lambda *args, **kwargs: ("alice", True),
     )
     window._ensure_username(project_path)
@@ -154,7 +154,7 @@ def test_username_label_updates_after_ensure_username(qtbot, tmp_path, monkeypat
     assert window.username_label.text() == NO_USERNAME_TEXT
 
     monkeypatch.setattr(
-        "opencoder.ui.main_window.QInputDialog.getText",
+        "openansho.ui.main_window.QInputDialog.getText",
         lambda *args, **kwargs: ("alice", True),
     )
     window._ensure_username(project_path)
@@ -168,7 +168,7 @@ def test_username_label_resets_to_placeholder_on_close_project(qtbot, tmp_path, 
     project_path = tmp_path / "project.sqlite"
     window.create_project(project_path)
     monkeypatch.setattr(
-        "opencoder.ui.main_window.QInputDialog.getText",
+        "openansho.ui.main_window.QInputDialog.getText",
         lambda *args, **kwargs: ("alice", True),
     )
     window._ensure_username(project_path)

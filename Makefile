@@ -1,12 +1,12 @@
-# Makefile for building the OpenCoder desktop app with PyInstaller.
+# Makefile for building the OpenAnsho desktop app with PyInstaller.
 #
 # PyInstaller does not cross-compile: it can only build an executable for
 # the OS it runs on. So build-mac must run on macOS, build-windows on
 # Windows, and build-linux on Linux (e.g. as separate jobs in a CI matrix).
 # `make build` builds for whichever platform you're currently on.
 
-APP_NAME := OpenCoder
-ENTRY_POINT := src/opencoder/__main__.py
+APP_NAME := OpenAnsho
+ENTRY_POINT := src/openansho/__main__.py
 DIST_DIR := dist
 BUILD_DIR := build
 VENV := .venv

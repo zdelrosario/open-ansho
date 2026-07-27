@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-USERNAME_FILENAME = ".opencoder_user"
+USERNAME_FILENAME = ".openansho_user"
 
 
 def username_file(project_path: Path) -> Path:

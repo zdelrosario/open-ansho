@@ -71,7 +71,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: opencoder-${{ matrix.artifact }}
+          name: openansho-${{ matrix.artifact }}
           path: dist/${{ matrix.artifact }}
 
   # Rotates each build's output onto the `builds` branch, keeping only the
@@ -91,7 +91,7 @@ jobs:
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: opencoder-*
+          pattern: openansho-*
           path: artifacts
 
       - name: Rotate builds onto the builds branch
@@ -111,9 +111,9 @@ jobs:
 
           DEST="$REPO_DIR/runs/${GITHUB_RUN_NUMBER}-${GITHUB_SHA:0:7}"
           mkdir -p "$DEST"
-          cp -r artifacts/opencoder-mac "$DEST/mac"
-          cp -r artifacts/opencoder-windows "$DEST/windows"
-          cp -r artifacts/opencoder-linux "$DEST/linux"
+          cp -r artifacts/openansho-mac "$DEST/mac"
+          cp -r artifacts/openansho-windows "$DEST/windows"
+          cp -r artifacts/openansho-linux "$DEST/linux"
 
           mkdir -p "$REPO_DIR/runs"
           TOTAL=$(ls -1 "$REPO_DIR/runs" | wc -l | tr -d ' ')

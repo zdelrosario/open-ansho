@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-OpenCoder is a desktop app (PySide6/Qt) for qualitative data analysis: importing text documents, tagging ("coding") spans of text with a hierarchical codebook, and exporting/reporting on the coded segments. Projects are single `.sqlite` files.
+OpenAnsho is a desktop app (PySide6/Qt) for qualitative data analysis: importing text documents, tagging ("coding") spans of text with a hierarchical codebook, and exporting/reporting on the coded segments. Projects are single `.sqlite` files.
 
 ## Commands
 
@@ -13,7 +13,7 @@ The project uses a `.venv` virtualenv at the repo root — activate it before ru
 ```bash
 source .venv/bin/activate       # activate the project virtualenv
 pip install -e ".[dev]"        # install package + dev deps (pytest, pytest-qt)
-python -m opencoder             # run the app (or the `opencoder` console script)
+python -m openansho             # run the app (or the `openansho` console script)
 pytest                          # run the full test suite
 pytest tests/test_db.py::test_create_code_and_list_codes   # run a single test
 ```

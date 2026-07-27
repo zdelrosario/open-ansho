@@ -1,6 +1,6 @@
 from PySide6.QtCore import Qt
 
-from opencoder.ui.main_window import (
+from openansho.ui.main_window import (
     CODE_SORT_ALL_DOCUMENTS,
     CODE_SORT_CURRENT_DOCUMENT,
     MainWindow,

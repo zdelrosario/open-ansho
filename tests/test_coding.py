@@ -1,6 +1,6 @@
-from opencoder import db
-from opencoder.ui.main_window import BASE_COLOR_CLASSES
-from opencoder.ui.main_window import MainWindow
+from openansho import db
+from openansho.ui.main_window import BASE_COLOR_CLASSES
+from openansho.ui.main_window import MainWindow
 
 
 def _open_project_with_document(window, tmp_path, content="Hello frustrating world."):
@@ -127,7 +127,7 @@ def test_apply_code_button_noop_without_selection(qtbot, tmp_path, monkeypatch):
 
     shown = []
     monkeypatch.setattr(
-        "opencoder.ui.main_window.QMessageBox.information",
+        "openansho.ui.main_window.QMessageBox.information",
         lambda *args, **kwargs: shown.append(args),
     )
 

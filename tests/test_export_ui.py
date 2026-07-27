@@ -1,6 +1,6 @@
 import csv
 
-from opencoder.ui.main_window import (
+from openansho.ui.main_window import (
     PROJECT_SECTION_LABEL_CLOSED,
     PROJECT_SECTION_LABEL_OPEN,
     MainWindow,
@@ -54,11 +54,11 @@ def test_on_export_csv_writes_file(qtbot, tmp_path, monkeypatch):
 
     out_path = tmp_path / "out.csv"
     monkeypatch.setattr(
-        "opencoder.ui.main_window.QFileDialog.getSaveFileName",
+        "openansho.ui.main_window.QFileDialog.getSaveFileName",
         lambda *args, **kwargs: (str(out_path), ""),
     )
     monkeypatch.setattr(
-        "opencoder.ui.main_window.QMessageBox.information",
+        "openansho.ui.main_window.QMessageBox.information",
         lambda *args, **kwargs: None,
     )
 
@@ -83,11 +83,11 @@ def test_on_export_code_frequency_csv_writes_file(qtbot, tmp_path, monkeypatch):
 
     out_path = tmp_path / "out.csv"
     monkeypatch.setattr(
-        "opencoder.ui.main_window.QFileDialog.getSaveFileName",
+        "openansho.ui.main_window.QFileDialog.getSaveFileName",
         lambda *args, **kwargs: (str(out_path), ""),
     )
     monkeypatch.setattr(
-        "opencoder.ui.main_window.QMessageBox.information",
+        "openansho.ui.main_window.QMessageBox.information",
         lambda *args, **kwargs: None,
     )
 
@@ -112,11 +112,11 @@ def test_on_export_code_user_frequency_csv_writes_file(qtbot, tmp_path, monkeypa
 
     out_path = tmp_path / "out.csv"
     monkeypatch.setattr(
-        "opencoder.ui.main_window.QFileDialog.getSaveFileName",
+        "openansho.ui.main_window.QFileDialog.getSaveFileName",
         lambda *args, **kwargs: (str(out_path), ""),
     )
     monkeypatch.setattr(
-        "opencoder.ui.main_window.QMessageBox.information",
+        "openansho.ui.main_window.QMessageBox.information",
         lambda *args, **kwargs: None,
     )
 
@@ -142,7 +142,7 @@ def test_on_code_frequency_report_builds_dialog_with_rows(qtbot, tmp_path, monke
         def exec(self):
             captured["executed"] = True
 
-    monkeypatch.setattr("opencoder.ui.main_window.CodeFrequencyDialog", FakeDialog)
+    monkeypatch.setattr("openansho.ui.main_window.CodeFrequencyDialog", FakeDialog)
 
     window._on_code_frequency_report()
 

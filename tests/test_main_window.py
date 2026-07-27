@@ -1,5 +1,5 @@
-from opencoder import db
-from opencoder.ui.main_window import MainWindow
+from openansho import db
+from openansho.ui.main_window import MainWindow
 
 
 def test_new_window_has_import_disabled(qtbot):

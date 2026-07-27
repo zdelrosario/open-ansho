@@ -2,7 +2,7 @@ import sys
 
 from PySide6.QtWidgets import QApplication
 
-from opencoder.ui.main_window import MainWindow
+from openansho.ui.main_window import MainWindow
 
 
 def main() -> None:

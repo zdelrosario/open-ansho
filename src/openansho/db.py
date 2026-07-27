@@ -1,4 +1,4 @@
-"""SQLite-backed data access layer for OpenCoder projects.
+"""SQLite-backed data access layer for OpenAnsho projects.
 
 A project is a single .sqlite file containing documents, a codebook
 (codes, possibly nested), and the coded segments linking the two.

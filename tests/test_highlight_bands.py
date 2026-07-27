@@ -1,7 +1,7 @@
 from PySide6.QtCore import QRect, QRectF
 from PySide6.QtGui import QColor, QTextCursor
 
-from opencoder.ui.vim_viewer import CodeHighlight, VimTextViewer
+from openansho.ui.vim_viewer import CodeHighlight, VimTextViewer
 
 
 def _make_viewer(qtbot, text="Hello frustrating world.\nSecond line here."):
@@ -91,7 +91,7 @@ def test_paint_code_highlight_uses_full_height_for_a_single_band(qtbot, monkeypa
 
 
 def test_paint_code_highlight_outlines_a_conflicting_segment(qtbot, monkeypatch):
-    from opencoder.ui.vim_viewer import CONFLICT_OUTLINE_COLOR
+    from openansho.ui.vim_viewer import CONFLICT_OUTLINE_COLOR
 
     viewer = _make_viewer(qtbot)
     fixed_rect = QRect(10, 100, 40, 20)

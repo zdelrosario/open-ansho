@@ -1,8 +1,8 @@
 import pytest
 from PySide6.QtCore import Qt
 
-from opencoder import db
-from opencoder.ui.main_window import BASE_COLOR_CLASSES, MainWindow
+from openansho import db
+from openansho.ui.main_window import BASE_COLOR_CLASSES, MainWindow
 
 
 def _open_project_with_document(window, tmp_path, content="Hello frustrating world."):

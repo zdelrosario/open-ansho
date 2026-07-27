@@ -1,8 +1,8 @@
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 
-from opencoder import db, user
-from opencoder.ui.main_window import NO_USERNAME_TEXT, MainWindow
+from openansho import db, user
+from openansho.ui.main_window import NO_USERNAME_TEXT, MainWindow
 
 
 def _setup_project_with_document(qtbot, tmp_path):

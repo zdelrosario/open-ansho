@@ -1,4 +1,4 @@
-from opencoder.ui.main_window import MainWindow
+from openansho.ui.main_window import MainWindow
 
 
 def test_focusing_a_pane_marks_only_that_pane(qtbot):

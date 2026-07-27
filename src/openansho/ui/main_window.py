@@ -28,16 +28,16 @@ from PySide6.QtWidgets import (
     QWidgetAction,
 )
 
-from opencoder import db, reporting, user
-from opencoder.db import Code
-from opencoder.ui.checkable_combo_box import CheckableComboBox
-from opencoder.ui.code_filter_input import CodeFilterLineEdit
-from opencoder.ui.code_tree import CodeTreeWidget
-from opencoder.ui.report_dialog import CodeFrequencyDialog, CodeUserFrequencyDialog
-from opencoder.ui.shortcuts_dialog import ShortcutsDialog
-from opencoder.ui.vim_viewer import CodeHighlight, VimTextViewer
+from openansho import db, reporting, user
+from openansho.db import Code
+from openansho.ui.checkable_combo_box import CheckableComboBox
+from openansho.ui.code_filter_input import CodeFilterLineEdit
+from openansho.ui.code_tree import CodeTreeWidget
+from openansho.ui.report_dialog import CodeFrequencyDialog, CodeUserFrequencyDialog
+from openansho.ui.shortcuts_dialog import ShortcutsDialog
+from openansho.ui.vim_viewer import CodeHighlight, VimTextViewer
 
-PROJECT_FILTER = "OpenCoder Project (*.sqlite)"
+PROJECT_FILTER = "OpenAnsho Project (*.sqlite)"
 TEXT_FILTER = "Text Files (*.txt);;All Files (*)"
 CSV_FILTER = "CSV Files (*.csv)"
 JSON_FILTER = "JSON Files (*.json)"
@@ -47,8 +47,8 @@ PROJECT_SECTION_LABEL_CLOSED = "Project (first open a project)"
 
 NO_USERNAME_TEXT = "(NO USERNAME)"
 
-SETTINGS_ORGANIZATION = "OpenCoder"
-SETTINGS_APPLICATION = "OpenCoder"
+SETTINGS_ORGANIZATION = "OpenAnsho"
+SETTINGS_APPLICATION = "OpenAnsho"
 RECENT_PROJECTS_KEY = "recentProjects"
 MAX_RECENT_PROJECTS = 10
 
@@ -155,7 +155,7 @@ class MainWindow(QMainWindow):
         self._code_sort_mode: str = CODE_SORT_ALPHABETICAL
         self._settings = QSettings(SETTINGS_ORGANIZATION, SETTINGS_APPLICATION)
 
-        self.setWindowTitle("OpenCoder")
+        self.setWindowTitle("OpenAnsho")
         self.resize(1150, 650)
 
         self.document_list = QListWidget()
@@ -822,7 +822,7 @@ class MainWindow(QMainWindow):
         self._refresh_documents()
         self._refresh_codes()
         self._update_actions_enabled()
-        self.setWindowTitle("OpenCoder")
+        self.setWindowTitle("OpenAnsho")
         self.statusBar().showMessage("No project open")
 
     def import_document(self, path: Path, *, overwrite: bool = False) -> bool:
@@ -1051,7 +1051,7 @@ class MainWindow(QMainWindow):
         self._update_username_label()
         self._current_document_id = None
         self._user_filter_overrides = {}
-        self.setWindowTitle(f"OpenCoder — {path.name}")
+        self.setWindowTitle(f"OpenAnsho — {path.name}")
         self.statusBar().showMessage(str(path))
         self._refresh_documents()
         self._refresh_user_filter()

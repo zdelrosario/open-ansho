@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from opencoder import db, reporting
+from openansho import db, reporting
 
 
 @pytest.fixture

@@ -1,4 +1,4 @@
-from opencoder.ui.main_window import MainWindow
+from openansho.ui.main_window import MainWindow
 
 
 def test_typing_filters_tree_by_substring(qtbot, tmp_path):

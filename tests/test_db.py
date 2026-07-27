@@ -2,7 +2,7 @@ import sqlite3
 
 import pytest
 
-from opencoder import db
+from openansho import db
 
 
 @pytest.fixture

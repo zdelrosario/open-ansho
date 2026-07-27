@@ -1,8 +1,8 @@
 import pytest
 from PySide6.QtGui import QColor
 
-from opencoder import db
-from opencoder.ui.main_window import MainWindow
+from openansho import db
+from openansho.ui.main_window import MainWindow
 
 
 def test_reparent_code_moves_top_level_code_under_new_parent(qtbot, tmp_path):
@@ -163,7 +163,7 @@ def test_on_code_reparented_signal_reverts_tree_on_invalid_move(qtbot, tmp_path,
 
     shown = []
     monkeypatch.setattr(
-        "opencoder.ui.main_window.QMessageBox.warning",
+        "openansho.ui.main_window.QMessageBox.warning",
         lambda *args, **kwargs: shown.append(args),
     )
 

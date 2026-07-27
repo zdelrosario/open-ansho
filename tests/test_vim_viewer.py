@@ -2,7 +2,7 @@ from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QKeyEvent, QTextCursor
 from PySide6.QtTest import QTest
 
-from opencoder.ui.vim_viewer import VimTextViewer
+from openansho.ui.vim_viewer import VimTextViewer
 
 
 def _make_viewer(qtbot, text="Hello frustrating world.\nSecond line here."):
@@ -247,7 +247,7 @@ def test_visual_mode_preserves_an_existing_mouse_style_selection(qtbot):
 def test_code_highlights_and_cursor_block_coexist(qtbot):
     from PySide6.QtGui import QColor
 
-    from opencoder.ui.vim_viewer import CodeHighlight
+    from openansho.ui.vim_viewer import CodeHighlight
 
     viewer = _make_viewer(qtbot)
     viewer.set_code_highlights(

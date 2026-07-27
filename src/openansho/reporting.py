@@ -11,8 +11,8 @@ import json
 import sqlite3
 from pathlib import Path
 
-from opencoder import db
-from opencoder.db import Code
+from openansho import db
+from openansho.db import Code
 
 CSV_FIELDNAMES = [
     "document",
