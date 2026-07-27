@@ -272,7 +272,7 @@ def test_c_jumps_to_next_segment_and_wraps(qtbot, tmp_path):
     assert cursor.position() == 0
 
 
-def test_p_jumps_to_previous_segment_and_wraps(qtbot, tmp_path):
+def test_shift_c_jumps_to_previous_segment_and_wraps(qtbot, tmp_path):
     window = MainWindow()
     qtbot.addWidget(window)
     window.show()
@@ -286,23 +286,23 @@ def test_p_jumps_to_previous_segment_and_wraps(qtbot, tmp_path):
     window.viewer.setFocus()
     qtbot.waitUntil(lambda: window.viewer.hasFocus())
 
-    QTest.keyClick(window.viewer, Qt.Key_P)
+    QTest.keyClick(window.viewer, Qt.Key_C, Qt.ShiftModifier)
     cursor = window.viewer.textCursor()
     assert (cursor.selectionStart(), cursor.selectionEnd()) == (6, 17)
     assert cursor.position() == 6  # cursor rests at the start of the segment
 
-    QTest.keyClick(window.viewer, Qt.Key_P)
+    QTest.keyClick(window.viewer, Qt.Key_C, Qt.ShiftModifier)
     cursor = window.viewer.textCursor()
     assert (cursor.selectionStart(), cursor.selectionEnd()) == (0, 5)
     assert cursor.position() == 0
 
-    QTest.keyClick(window.viewer, Qt.Key_P)  # wraps to the last segment
+    QTest.keyClick(window.viewer, Qt.Key_C, Qt.ShiftModifier)  # wraps to the last segment
     cursor = window.viewer.textCursor()
     assert (cursor.selectionStart(), cursor.selectionEnd()) == (6, 17)
     assert cursor.position() == 6
 
 
-def test_c_and_p_do_nothing_without_segments(qtbot, tmp_path):
+def test_c_and_shift_c_do_nothing_without_segments(qtbot, tmp_path):
     window = MainWindow()
     qtbot.addWidget(window)
     window.show()
@@ -313,7 +313,7 @@ def test_c_and_p_do_nothing_without_segments(qtbot, tmp_path):
     qtbot.waitUntil(lambda: window.viewer.hasFocus())
 
     QTest.keyClick(window.viewer, Qt.Key_C)
-    QTest.keyClick(window.viewer, Qt.Key_P)
+    QTest.keyClick(window.viewer, Qt.Key_C, Qt.ShiftModifier)
 
     assert window.viewer.textCursor().position() == 0
     assert not window.viewer.textCursor().hasSelection()

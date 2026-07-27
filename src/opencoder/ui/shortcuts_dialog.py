@@ -22,7 +22,7 @@ SHORTCUT_SECTIONS = [
             ("Enter", "Apply the current code to the selection"),
             ("x", "Delete segment(s) at the cursor, or in the visual selection"),
             ("c", "Jump to the next coded segment"),
-            ("p", "Jump to the previous coded segment"),
+            ("C", "Jump to the previous coded segment"),
             ("h j k l", "Move left / down / up / right (arrow keys also work)"),
             ("w / b / e", "Move to next / previous / end of word"),
             ("W / B / E", "Move by WORD (whitespace-delimited)"),

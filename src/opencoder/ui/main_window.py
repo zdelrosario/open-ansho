@@ -302,11 +302,8 @@ class MainWindow(QMainWindow):
                         return True
             elif event.key() == Qt.Key_C:
                 if QApplication.focusWidget() is self.viewer and self.viewer.mode == VimTextViewer.NORMAL:
-                    self._jump_to_adjacent_segment(1)
-                    return True
-            elif event.key() == Qt.Key_P:
-                if QApplication.focusWidget() is self.viewer and self.viewer.mode == VimTextViewer.NORMAL:
-                    self._jump_to_adjacent_segment(-1)
+                    shift = bool(event.modifiers() & Qt.ShiftModifier)
+                    self._jump_to_adjacent_segment(-1 if shift else 1)
                     return True
             elif event.key() == Qt.Key_Question:
                 if not viewer_searching and QApplication.focusWidget() is self.viewer:
