@@ -1193,6 +1193,10 @@ class MainWindow(QMainWindow):
         band_index_by_username = {name: index for index, name in enumerate(ordered_usernames)}
         band_count = max(len(ordered_usernames), 1)
 
+        conflicting_segment_ids = (
+            self._overlapping_different_code_segment_ids(segments) if band_count > 1 else set()
+        )
+
         highlights = []
         for segment in segments:
             code = codes_by_id.get(segment.code_id)
@@ -1206,10 +1210,30 @@ class MainWindow(QMainWindow):
                     color=color,
                     band_index=band_index_by_username[segment.created_by or ""],
                     band_count=band_count,
+                    outlined=segment.id in conflicting_segment_ids,
                 )
             )
 
         self.viewer.set_code_highlights(highlights)
+
+    @staticmethod
+    def _overlapping_different_code_segment_ids(segments: list[db.Segment]) -> set[int]:
+        """IDs of segments that overlap another segment coded with a different code.
+
+        Only meaningful when multiple users are selected: segments from a
+        single user are already visually distinguished per-code (and this
+        matches the app's existing overlap handling, which this doesn't
+        change), so conflicts are only flagged across the combined set.
+        """
+        conflicting: set[int] = set()
+        for i, a in enumerate(segments):
+            for b in segments[i + 1 :]:
+                if a.code_id == b.code_id:
+                    continue
+                if a.start_offset < b.end_offset and b.start_offset < a.end_offset:
+                    conflicting.add(a.id)
+                    conflicting.add(b.id)
+        return conflicting
 
     def _segment_at_viewer_cursor(self) -> db.Segment | None:
         if self.conn is None or self._current_document_id is None:

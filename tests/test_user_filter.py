@@ -200,3 +200,61 @@ def test_single_selected_user_gets_full_height_band(qtbot, tmp_path):
     highlight = window.viewer._code_highlights[0]
     assert highlight.band_index == 0
     assert highlight.band_count == 1
+
+
+def test_overlapping_segments_with_different_codes_are_outlined(qtbot, tmp_path):
+    window = _setup_project_with_document(qtbot, tmp_path)
+    frustration = window.add_code("Frustration")
+    setting = window.add_code("Setting")
+
+    window.username = "alice"
+    window.apply_segment(frustration.id, 6, 17)  # "frustrating"
+    _add_existing_segment(window, setting, 10, 20, "bob")  # overlaps, different code
+    _check(window.user_filter_combo, "bob")
+
+    highlights = window.viewer._code_highlights
+    assert len(highlights) == 2
+    assert all(h.outlined for h in highlights)
+
+
+def test_overlapping_segments_with_the_same_code_are_not_outlined(qtbot, tmp_path):
+    window = _setup_project_with_document(qtbot, tmp_path)
+    frustration = window.add_code("Frustration")
+
+    window.username = "alice"
+    window.apply_segment(frustration.id, 6, 17)
+    _add_existing_segment(window, frustration, 10, 20, "bob")  # overlaps, same code
+    _check(window.user_filter_combo, "bob")
+
+    highlights = window.viewer._code_highlights
+    assert len(highlights) == 2
+    assert not any(h.outlined for h in highlights)
+
+
+def test_non_overlapping_segments_with_different_codes_are_not_outlined(qtbot, tmp_path):
+    window = _setup_project_with_document(qtbot, tmp_path)
+    frustration = window.add_code("Frustration")
+    setting = window.add_code("Setting")
+
+    window.username = "alice"
+    window.apply_segment(frustration.id, 0, 5)
+    _add_existing_segment(window, setting, 18, 23, "bob")  # no overlap
+    _check(window.user_filter_combo, "bob")
+
+    highlights = window.viewer._code_highlights
+    assert len(highlights) == 2
+    assert not any(h.outlined for h in highlights)
+
+
+def test_overlapping_different_codes_not_outlined_when_only_one_user_selected(qtbot, tmp_path):
+    window = _setup_project_with_document(qtbot, tmp_path)
+    frustration = window.add_code("Frustration")
+    setting = window.add_code("Setting")
+
+    window.username = "alice"
+    window.apply_segment(frustration.id, 6, 17)
+    window.apply_segment(setting.id, 10, 20)  # same user, overlapping, different code
+
+    highlights = window.viewer._code_highlights
+    assert len(highlights) == 2
+    assert not any(h.outlined for h in highlights)

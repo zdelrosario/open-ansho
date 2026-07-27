@@ -4,8 +4,11 @@ import re
 from dataclasses import dataclass
 
 from PySide6.QtCore import QRect, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPalette, QTextCharFormat, QTextCursor
+from PySide6.QtGui import QColor, QPainter, QPalette, QPen, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import QPlainTextEdit, QTextEdit
+
+CONFLICT_OUTLINE_COLOR = QColor("red")
+CONFLICT_OUTLINE_WIDTH = 2
 
 
 @dataclass(frozen=True)
@@ -16,6 +19,9 @@ class CodeHighlight:
     `band_count` equal horizontal stripes and pick stripe `band_index`
     (0 = top), so segments from different users stack instead of
     overlapping when more than one user is selected.
+
+    `outlined` marks a segment that overlaps another selected segment
+    coded with a different code, so its band gets a red border.
     """
 
     start: int
@@ -23,6 +29,7 @@ class CodeHighlight:
     color: QColor
     band_index: int
     band_count: int
+    outlined: bool = False
 
 
 class VimTextViewer(QPlainTextEdit):
@@ -467,7 +474,15 @@ class VimTextViewer(QPlainTextEdit):
         for rect in self._line_rects_for_range(highlight.start, highlight.end):
             band_height = rect.height() / highlight.band_count
             band_top = rect.top() + highlight.band_index * band_height
-            painter.fillRect(QRectF(rect.left(), band_top, rect.width(), band_height), highlight.color)
+            band_rect = QRectF(rect.left(), band_top, rect.width(), band_height)
+
+            painter.fillRect(band_rect, highlight.color)
+            if highlight.outlined:
+                pen = QPen(CONFLICT_OUTLINE_COLOR)
+                pen.setWidth(CONFLICT_OUTLINE_WIDTH)
+                painter.setPen(pen)
+                painter.drawRect(band_rect)
+                painter.setPen(Qt.NoPen)
 
     def _line_rects_for_range(self, start: int, end: int) -> list[QRect]:
         """Viewport rects covering [start, end), one per visual line it spans.
