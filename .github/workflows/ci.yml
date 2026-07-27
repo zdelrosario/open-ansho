@@ -74,11 +74,14 @@ jobs:
           name: opencoder-${{ matrix.artifact }}
           path: dist/${{ matrix.artifact }}
 
-  # Persists every build's output to the `builds` branch so it survives past
-  # the 90-day artifact retention window. Only runs for pushes to main (not
-  # pull_request), since a PR's build shouldn't be written to a shared,
-  # permanent branch and forked PRs don't have write-token permissions anyway.
-  cache-builds:
+  # Rotates each build's output onto the `builds` branch, keeping only the
+  # KEEP_BUILDS most recent runs so the branch doesn't grow unbounded. Each
+  # push replaces the branch with a fresh single-commit orphan tree (rather
+  # than adding a commit on top), so old build blobs don't pile up in git
+  # history either. Only runs for pushes to main (not pull_request), since a
+  # PR's build shouldn't be written to a shared branch, and forked PRs don't
+  # have write-token permissions anyway.
+  rotate-builds:
     needs: build
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
@@ -91,18 +94,16 @@ jobs:
           pattern: opencoder-*
           path: artifacts
 
-      - name: Commit builds to the builds branch
+      - name: Rotate builds onto the builds branch
         run: |
           set -euo pipefail
 
+          KEEP_BUILDS=5
           REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           REPO_DIR="$(mktemp -d)"
 
-          if git clone --quiet --depth 1 --branch builds "$REMOTE" "$REPO_DIR" 2>/dev/null; then
-            :
-          else
+          if ! git clone --quiet --depth 1 --branch builds "$REMOTE" "$REPO_DIR" 2>/dev/null; then
             git -C "$REPO_DIR" init --quiet
-            git -C "$REPO_DIR" checkout --quiet --orphan builds
           fi
 
           git -C "$REPO_DIR" config user.name "github-actions[bot]"
@@ -114,8 +115,17 @@ jobs:
           cp -r artifacts/opencoder-windows "$DEST/windows"
           cp -r artifacts/opencoder-linux "$DEST/linux"
 
-          git -C "$REPO_DIR" add -A
-          git -C "$REPO_DIR" commit --quiet -m "Build for ${GITHUB_SHA} (run ${GITHUB_RUN_NUMBER})"
-          git -C "$REPO_DIR" push --quiet "$REMOTE" HEAD:builds
+          mkdir -p "$REPO_DIR/runs"
+          TOTAL=$(ls -1 "$REPO_DIR/runs" | wc -l | tr -d ' ')
+          if [ "$TOTAL" -gt "$KEEP_BUILDS" ]; then
+            DROP=$((TOTAL - KEEP_BUILDS))
+            (cd "$REPO_DIR/runs" && ls -1 | sort -t- -k1,1n | sed -n "1,${DROP}p" | xargs -r rm -rf)
+          fi
+
+          cd "$REPO_DIR"
+          git checkout --quiet --orphan builds-next
+          git add -A
+          git commit --quiet -m "Build for ${GITHUB_SHA} (run ${GITHUB_RUN_NUMBER})"
+          git push --quiet --force "$REMOTE" builds-next:builds
         env:
           GH_TOKEN: ${{ github.token }}
