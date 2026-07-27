@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import random
 import sqlite3
 from pathlib import Path
 
@@ -50,16 +51,27 @@ SETTINGS_APPLICATION = "OpenCoder"
 RECENT_PROJECTS_KEY = "recentProjects"
 MAX_RECENT_PROJECTS = 10
 
-CODE_COLOR_PALETTE = [
-    "#f94144",
-    "#f3722c",
-    "#f9c74f",
-    "#90be6d",
-    "#43aa8b",
-    "#577590",
-    "#277da1",
-    "#9c6ade",
+BASE_COLOR_CLASSES = [
+    "#D81B60",
+    "#1E88E5",
+    "#FFC107",
+    "#004D40",
+    "#DE6E1C",
 ]
+
+# Fraction of the way to blend a child's color toward white, relative to its
+# parent's own shade, so nested codes read as progressively lighter tints of
+# the same base color class.
+CHILD_COLOR_LIGHTEN_FACTOR = 0.35
+
+
+def _lighten_color(hex_color: str, factor: float = CHILD_COLOR_LIGHTEN_FACTOR) -> str:
+    base = QColor(hex_color)
+    r = base.red() + (255 - base.red()) * factor
+    g = base.green() + (255 - base.green()) * factor
+    b = base.blue() + (255 - base.blue()) * factor
+    return QColor(int(r), int(g), int(b)).name()
+
 
 HIGHLIGHT_ALPHA = 120
 
@@ -758,12 +770,14 @@ class MainWindow(QMainWindow):
         self._select_document(doc.id)
         return True
 
-    def add_code(self, name: str, parent_id: int | None = None, color: str | None = None) -> Code:
+    def add_code(self, name: str, parent_id: int | None = None) -> Code:
         if self.conn is None:
             raise RuntimeError("No project open")
-        if color is None:
-            color = self._next_color()
-        code = db.create_code(self.conn, name, parent_id=parent_id, color=color)
+        parent = db.get_code(self.conn, parent_id) if parent_id is not None else None
+        color_class, color = self._color_for_parent(parent)
+        code = db.create_code(
+            self.conn, name, parent_id=parent_id, color=color, color_class=color_class
+        )
         self._refresh_codes()
         return code
 
@@ -781,8 +795,42 @@ class MainWindow(QMainWindow):
             raise ValueError("A code cannot be its own parent.")
         if parent_id is not None and self._is_descendant_of(parent_id, code_id):
             raise ValueError("Cannot move a code under one of its own descendants.")
-        code = db.set_code_parent(self.conn, code_id, parent_id)
+        db.set_code_parent(self.conn, code_id, parent_id)
+        code = self._recolor_subtree(code_id, parent_id)
         self._refresh_codes()
+        self._refresh_highlights()
+        return code
+
+    def _color_for_parent(self, parent: Code | None) -> tuple[str, str]:
+        """Return (color_class, color) for a code with the given parent.
+
+        Root codes (parent is None) get a freshly balanced base color class;
+        child codes inherit the parent's color class, lightened one step.
+        """
+        if parent is not None:
+            return parent.color_class, _lighten_color(parent.color)
+        color_class = self._next_color_class()
+        return color_class, color_class
+
+    def _recolor_subtree(self, code_id: int, parent_id: int | None) -> Code:
+        """Recolor `code_id` per its new parent, then cascade to its descendants
+        so the whole moved subtree keeps the parent-inherits-lighter invariant."""
+        parent = db.get_code(self.conn, parent_id) if parent_id is not None else None
+        color_class, color = self._color_for_parent(parent)
+        code = db.set_code_color(self.conn, code_id, color, color_class)
+
+        children_by_parent: dict[int, list[Code]] = {}
+        for other in db.list_codes(self.conn):
+            if other.parent_id is not None:
+                children_by_parent.setdefault(other.parent_id, []).append(other)
+
+        def recolor_children(ancestor_id: int, ancestor_color: str) -> None:
+            for child in children_by_parent.get(ancestor_id, []):
+                child_color = _lighten_color(ancestor_color)
+                db.set_code_color(self.conn, child.id, child_color, color_class)
+                recolor_children(child.id, child_color)
+
+        recolor_children(code_id, color)
         return code
 
     def delete_code(self, code_id: int) -> None:
@@ -1171,9 +1219,12 @@ class MainWindow(QMainWindow):
                 self.document_list.setCurrentItem(item)
                 return
 
-    def _next_color(self) -> str:
-        count = len(db.list_codes(self.conn)) if self.conn else 0
-        return CODE_COLOR_PALETTE[count % len(CODE_COLOR_PALETTE)]
+    def _next_color_class(self) -> str:
+        counts = db.count_codes_by_color_class(self.conn) if self.conn else {}
+        class_counts = {cls: counts.get(cls, 0) for cls in BASE_COLOR_CLASSES}
+        max_count = max(class_counts.values())
+        candidates = [cls for cls, count in class_counts.items() if count < max_count]
+        return random.choice(candidates or BASE_COLOR_CLASSES)
 
     def _update_actions_enabled(self) -> None:
         has_project = self.conn is not None

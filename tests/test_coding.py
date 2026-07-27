@@ -1,5 +1,5 @@
 from opencoder import db
-from opencoder.ui.main_window import CODE_COLOR_PALETTE
+from opencoder.ui.main_window import BASE_COLOR_CLASSES
 from opencoder.ui.main_window import MainWindow
 
 
@@ -12,28 +12,44 @@ def _open_project_with_document(window, tmp_path, content="Hello frustrating wor
     return doc_path
 
 
-def test_add_code_appears_in_list_with_color(qtbot, tmp_path):
+def test_add_code_appears_in_list_with_base_color(qtbot, tmp_path):
     window = MainWindow()
     qtbot.addWidget(window)
     window.create_project(tmp_path / "project.sqlite")
 
     code = window.add_code("Frustration")
 
-    assert code.color == CODE_COLOR_PALETTE[0]
+    assert code.color in BASE_COLOR_CLASSES
+    assert code.color_class == code.color
     assert window.code_tree.topLevelItemCount() == 1
     assert window.code_tree.topLevelItem(0).text(0) == "Frustration"
 
 
-def test_add_multiple_codes_cycles_palette(qtbot, tmp_path):
+def test_root_codes_balance_across_base_color_classes(qtbot, tmp_path):
     window = MainWindow()
     qtbot.addWidget(window)
     window.create_project(tmp_path / "project.sqlite")
 
-    first = window.add_code("A")
-    second = window.add_code("B")
+    for name in "ABCDE":
+        window.add_code(name)
 
-    assert first.color == CODE_COLOR_PALETTE[0]
-    assert second.color == CODE_COLOR_PALETTE[1]
+    counts = db.count_codes_by_color_class(window.conn)
+    assert counts == {color_class: 1 for color_class in BASE_COLOR_CLASSES}
+
+
+def test_child_code_inherits_parent_color_class_with_lighter_shade(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.create_project(tmp_path / "project.sqlite")
+
+    parent = window.add_code("Emotions")
+    child = window.add_code("Frustration", parent_id=parent.id)
+    grandchild = window.add_code("Anger", parent_id=child.id)
+
+    assert child.color_class == parent.color_class
+    assert grandchild.color_class == parent.color_class
+    assert child.color != parent.color
+    assert grandchild.color != child.color
 
 
 def test_apply_segment_creates_segment_and_highlight(qtbot, tmp_path):

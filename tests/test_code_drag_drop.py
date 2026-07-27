@@ -1,5 +1,7 @@
 import pytest
+from PySide6.QtGui import QColor
 
+from opencoder import db
 from opencoder.ui.main_window import MainWindow
 
 
@@ -34,6 +36,83 @@ def test_reparent_code_to_none_makes_it_top_level_again(qtbot, tmp_path):
         window.code_tree.topLevelItem(i).text(0) for i in range(window.code_tree.topLevelItemCount())
     }
     assert top_level_names == {"Emotions", "Frustration"}
+
+
+def test_reparent_code_recolors_to_match_new_parent(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.create_project(tmp_path / "project.sqlite")
+
+    emotions = window.add_code("Emotions")
+    reactions = window.add_code("Reactions")
+    frustration = window.add_code("Frustration")
+
+    window.reparent_code(frustration.id, emotions.id)
+
+    moved = db.get_code(window.conn, frustration.id)
+    assert moved.color_class == emotions.color_class
+    assert moved.color != emotions.color
+
+    window.reparent_code(frustration.id, reactions.id)
+
+    moved = db.get_code(window.conn, frustration.id)
+    assert moved.color_class == reactions.color_class
+    assert moved.color != reactions.color
+
+
+def test_reparent_code_updates_viewer_highlight_color(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.create_project(tmp_path / "project.sqlite")
+    doc_path = tmp_path / "doc.txt"
+    doc_path.write_text("Hello frustrating world.", encoding="utf-8")
+    window.import_document(doc_path)
+    window.document_list.setCurrentRow(0)
+
+    emotions = window.add_code("Emotions")
+    frustration = window.add_code("Frustration")
+    window.apply_segment(frustration.id, 6, 16)  # "frustrating"
+
+    window.reparent_code(frustration.id, emotions.id)
+
+    moved = db.get_code(window.conn, frustration.id)
+    highlight = window.viewer._code_highlights[0]
+    expected = QColor(moved.color)
+    expected.setAlpha(highlight.format.background().color().alpha())
+    assert highlight.format.background().color() == expected
+
+
+def test_reparent_code_to_none_reassigns_a_base_color_class(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.create_project(tmp_path / "project.sqlite")
+
+    emotions = window.add_code("Emotions")
+    frustration = window.add_code("Frustration", parent_id=emotions.id)
+
+    window.reparent_code(frustration.id, None)
+
+    moved = db.get_code(window.conn, frustration.id)
+    assert moved.color_class == moved.color
+
+
+def test_reparent_code_recolors_descendants(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.create_project(tmp_path / "project.sqlite")
+
+    emotions = window.add_code("Emotions")
+    grandparent = window.add_code("Grandparent")
+    parent = window.add_code("Parent", parent_id=grandparent.id)
+    child = window.add_code("Child", parent_id=parent.id)
+
+    window.reparent_code(grandparent.id, emotions.id)
+
+    moved_parent = db.get_code(window.conn, parent.id)
+    moved_child = db.get_code(window.conn, child.id)
+    assert moved_parent.color_class == emotions.color_class
+    assert moved_child.color_class == emotions.color_class
+    assert moved_child.color != moved_parent.color
 
 
 def test_reparent_code_rejects_self_parenting(qtbot, tmp_path):

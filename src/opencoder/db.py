@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS codes (
     name TEXT NOT NULL,
     parent_id INTEGER REFERENCES codes(id) ON DELETE CASCADE,
     color TEXT,
+    color_class TEXT,
     created_at TEXT NOT NULL
 );
 
@@ -54,6 +55,7 @@ class Code:
     name: str
     parent_id: int | None
     color: str | None
+    color_class: str | None
     created_at: str
 
 
@@ -92,6 +94,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(segments)")}
     if "created_by" not in columns:
         conn.execute("ALTER TABLE segments ADD COLUMN created_by TEXT")
+
+    code_columns = {row["name"] for row in conn.execute("PRAGMA table_info(codes)")}
+    if "color_class" not in code_columns:
+        conn.execute("ALTER TABLE codes ADD COLUMN color_class TEXT")
 
 
 def create_document(conn: sqlite3.Connection, name: str, content: str) -> Document:
@@ -132,10 +138,11 @@ def create_code(
     name: str,
     parent_id: int | None = None,
     color: str | None = None,
+    color_class: str | None = None,
 ) -> Code:
     cur = conn.execute(
-        "INSERT INTO codes (name, parent_id, color, created_at) VALUES (?, ?, ?, ?)",
-        (name, parent_id, color, _now()),
+        "INSERT INTO codes (name, parent_id, color, color_class, created_at) VALUES (?, ?, ?, ?, ?)",
+        (name, parent_id, color, color_class, _now()),
     )
     conn.commit()
     return get_code(conn, cur.lastrowid)
@@ -161,6 +168,26 @@ def set_code_parent(conn: sqlite3.Connection, code_id: int, parent_id: int | Non
     conn.execute("UPDATE codes SET parent_id = ? WHERE id = ?", (parent_id, code_id))
     conn.commit()
     return get_code(conn, code_id)
+
+
+def set_code_color(
+    conn: sqlite3.Connection, code_id: int, color: str, color_class: str
+) -> Code:
+    conn.execute(
+        "UPDATE codes SET color = ?, color_class = ? WHERE id = ?",
+        (color, color_class, code_id),
+    )
+    conn.commit()
+    return get_code(conn, code_id)
+
+
+def count_codes_by_color_class(conn: sqlite3.Connection) -> dict[str, int]:
+    """Map color_class -> number of codes (root or child) assigned to it."""
+    rows = conn.execute(
+        "SELECT color_class, COUNT(*) AS count FROM codes "
+        "WHERE color_class IS NOT NULL GROUP BY color_class"
+    ).fetchall()
+    return {row["color_class"]: row["count"] for row in rows}
 
 
 def delete_code(conn: sqlite3.Connection, code_id: int) -> None:
