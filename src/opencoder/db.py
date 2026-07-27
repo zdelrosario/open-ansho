@@ -253,6 +253,20 @@ def list_segments_for_code(conn: sqlite3.Connection, code_id: int) -> list[Segme
     return [Segment(**row) for row in rows]
 
 
+def list_all_segments(conn: sqlite3.Connection) -> list[Segment]:
+    rows = conn.execute("SELECT * FROM segments ORDER BY id").fetchall()
+    return [Segment(**row) for row in rows]
+
+
+def list_distinct_usernames(conn: sqlite3.Connection) -> list[str | None]:
+    """Distinct `segments.created_by` values with at least one segment.
+
+    `None` is included if any segment has no recorded creator.
+    """
+    rows = conn.execute("SELECT DISTINCT created_by FROM segments").fetchall()
+    return [row["created_by"] for row in rows]
+
+
 def count_segments_by_code(
     conn: sqlite3.Connection, document_id: int | None = None
 ) -> dict[int, int]:

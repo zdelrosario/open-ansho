@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 
 from opencoder import db, reporting, user
 from opencoder.db import Code
+from opencoder.ui.checkable_combo_box import CheckableComboBox
 from opencoder.ui.code_filter_input import CodeFilterLineEdit
 from opencoder.ui.code_tree import CodeTreeWidget
 from opencoder.ui.report_dialog import CodeFrequencyDialog, CodeUserFrequencyDialog
@@ -183,6 +184,8 @@ class MainWindow(QMainWindow):
         self._code_items_by_id: dict[int, QTreeWidgetItem] = {}
         self._last_selected_code_id: int | None = None
         self._segments_panel_code_id: int | None = None
+        self._known_usernames: list[str] = []
+        self._user_filter_initialized = False
 
         self.code_sort_combo = QComboBox()
         for value, label in CODE_SORT_OPTIONS:
@@ -205,6 +208,9 @@ class MainWindow(QMainWindow):
         self.segment_list.setObjectName("segmentListPane")
         self.segment_list.itemDoubleClicked.connect(self._on_segment_activated)
 
+        self.user_filter_combo = CheckableComboBox()
+        self.user_filter_combo.model().dataChanged.connect(self._on_user_filter_changed)
+
         code_panel = QWidget()
         code_layout = QVBoxLayout(code_panel)
         code_layout.setContentsMargins(0, 0, 0, 0)
@@ -225,6 +231,7 @@ class MainWindow(QMainWindow):
         segments_layout = QVBoxLayout(segments_container)
         segments_layout.setContentsMargins(0, 0, 0, 0)
         segments_layout.addWidget(QLabel("Coded Segments"))
+        segments_layout.addWidget(self.user_filter_combo)
         segments_layout.addWidget(self.segment_code_label)
         segments_layout.addWidget(self.segment_list)
         code_splitter.addWidget(segments_container)
@@ -909,6 +916,7 @@ class MainWindow(QMainWindow):
         db.create_segment(
             self.conn, self._current_document_id, code_id, start, end, created_by=self.username
         )
+        self._refresh_user_filter()
         self._refresh_codes()
         self._refresh_highlights()
         self._render_segments_panel()
@@ -930,6 +938,7 @@ class MainWindow(QMainWindow):
             return
         for segment in intersecting:
             db.delete_segment(self.conn, segment.id)
+        self._refresh_user_filter()
         self._refresh_codes()
         self._refresh_highlights()
         self._render_segments_panel()
@@ -947,6 +956,7 @@ class MainWindow(QMainWindow):
             return
         for segment in intersecting:
             db.delete_segment(self.conn, segment.id)
+        self._refresh_user_filter()
         self._refresh_codes()
         self._refresh_highlights()
         self._render_segments_panel()
@@ -988,9 +998,11 @@ class MainWindow(QMainWindow):
         self.username = None
         self._update_username_label()
         self._current_document_id = None
+        self._user_filter_initialized = False
         self.setWindowTitle(f"OpenCoder — {path.name}")
         self.statusBar().showMessage(str(path))
         self._refresh_documents()
+        self._refresh_user_filter()
         self._refresh_codes()
         self._update_actions_enabled()
         self._add_recent_project(path)
@@ -1041,6 +1053,62 @@ class MainWindow(QMainWindow):
             return lambda code: (-total_counts.get(code.id, 0), code.name.lower())
         return lambda code: code.name.lower()
 
+    def _selected_usernames(self) -> set[str]:
+        return set(self.user_filter_combo.currentData())
+
+    def _on_user_filter_changed(self) -> None:
+        self._refresh_codes()
+        self._refresh_highlights()
+        self._render_segments_panel()
+
+    def _refresh_user_filter(self) -> None:
+        combo = self.user_filter_combo
+        previous_checked = {
+            combo.model().item(i).data()
+            for i in range(combo.model().rowCount())
+            if combo.model().item(i).checkState() == Qt.Checked
+        }
+        previously_known = set(self._known_usernames)
+
+        if self.conn is None:
+            usernames: list[str] = []
+        else:
+            raw_usernames = db.list_distinct_usernames(self.conn)
+            real_names = sorted({name for name in raw_usernames if name})
+            has_no_username = any(not name for name in raw_usernames)
+            usernames = real_names + ([""] if has_no_username else [])
+
+        combo.blockSignals(True)
+        combo.clear()
+        for value in usernames:
+            label = value if value else NO_USERNAME_TEXT
+            should_check = (
+                not self._user_filter_initialized
+                or value in previous_checked
+                or value not in previously_known
+            )
+            combo.addItem(label, value, checked=should_check)
+        combo.blockSignals(False)
+        combo.updateText()
+
+        self._known_usernames = usernames
+        self._user_filter_initialized = True
+
+    def _filtered_segments_by_code(self, document_id: int | None = None) -> dict[int, int]:
+        """Map code_id -> number of segments coded by a currently-selected user."""
+        segments = (
+            db.list_segments_for_document(self.conn, document_id)
+            if document_id is not None
+            else db.list_all_segments(self.conn)
+        )
+        selected = self._selected_usernames()
+        counts: dict[int, int] = {}
+        for segment in segments:
+            if (segment.created_by or "") not in selected:
+                continue
+            counts[segment.code_id] = counts.get(segment.code_id, 0) + 1
+        return counts
+
     def _refresh_codes(self) -> None:
         previous_current = self.code_tree.currentItem()
         previous_code_id = (
@@ -1059,11 +1127,11 @@ class MainWindow(QMainWindow):
             children_by_parent.setdefault(code.parent_id, []).append(code)
 
         current_doc_counts = (
-            db.count_segments_by_code(self.conn, self._current_document_id)
+            self._filtered_segments_by_code(self._current_document_id)
             if self._current_document_id is not None
             else {}
         )
-        total_counts = db.count_segments_by_code(self.conn)
+        total_counts = self._filtered_segments_by_code()
 
         sort_key = self._code_sort_key(current_doc_counts, total_counts)
         for children in children_by_parent.values():
@@ -1099,7 +1167,12 @@ class MainWindow(QMainWindow):
             self.viewer.set_code_highlights([])
             return
         codes_by_id = {code.id: code for code in db.list_codes(self.conn)}
-        segments = db.list_segments_for_document(self.conn, self._current_document_id)
+        selected_usernames = self._selected_usernames()
+        segments = [
+            segment
+            for segment in db.list_segments_for_document(self.conn, self._current_document_id)
+            if (segment.created_by or "") in selected_usernames
+        ]
 
         selections = []
         for segment in segments:
@@ -1165,7 +1238,12 @@ class MainWindow(QMainWindow):
         )
 
         documents_by_id = {doc.id: doc for doc in db.list_documents(self.conn)}
-        segments = db.list_segments_for_code(self.conn, code_id)
+        selected_usernames = self._selected_usernames()
+        segments = [
+            segment
+            for segment in db.list_segments_for_code(self.conn, code_id)
+            if (segment.created_by or "") in selected_usernames
+        ]
         segments.sort(key=lambda s: s.document_id != self._current_document_id)
 
         for segment in segments:
