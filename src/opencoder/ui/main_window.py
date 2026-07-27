@@ -31,7 +31,7 @@ from opencoder import db, reporting, user
 from opencoder.db import Code
 from opencoder.ui.code_filter_input import CodeFilterLineEdit
 from opencoder.ui.code_tree import CodeTreeWidget
-from opencoder.ui.report_dialog import CodeFrequencyDialog
+from opencoder.ui.report_dialog import CodeFrequencyDialog, CodeUserFrequencyDialog
 from opencoder.ui.shortcuts_dialog import ShortcutsDialog
 from opencoder.ui.vim_viewer import VimTextViewer
 
@@ -349,6 +349,37 @@ class MainWindow(QMainWindow):
         self.export_json_action.triggered.connect(self._on_export_json)
         file_menu.addAction(self.export_json_action)
 
+        self.export_code_frequency_menu = QMenu("Export Code Frequency Report", self)
+        file_menu.addMenu(self.export_code_frequency_menu)
+
+        self.export_code_frequency_csv_action = QAction("Code Frequency Report (CSV)…", self)
+        self.export_code_frequency_csv_action.triggered.connect(
+            self._on_export_code_frequency_csv
+        )
+        self.export_code_frequency_menu.addAction(self.export_code_frequency_csv_action)
+
+        self.export_code_frequency_json_action = QAction("Code Frequency Report (JSON)…", self)
+        self.export_code_frequency_json_action.triggered.connect(
+            self._on_export_code_frequency_json
+        )
+        self.export_code_frequency_menu.addAction(self.export_code_frequency_json_action)
+
+        self.export_code_user_frequency_csv_action = QAction(
+            "Code/User Frequency Report (CSV)…", self
+        )
+        self.export_code_user_frequency_csv_action.triggered.connect(
+            self._on_export_code_user_frequency_csv
+        )
+        self.export_code_frequency_menu.addAction(self.export_code_user_frequency_csv_action)
+
+        self.export_code_user_frequency_json_action = QAction(
+            "Code/User Frequency Report (JSON)…", self
+        )
+        self.export_code_user_frequency_json_action.triggered.connect(
+            self._on_export_code_user_frequency_json
+        )
+        self.export_code_frequency_menu.addAction(self.export_code_user_frequency_json_action)
+
         self.close_project_action = QAction("&Close Project", self)
         self.close_project_action.triggered.connect(self.close_project)
         file_menu.addAction(self.close_project_action)
@@ -365,6 +396,10 @@ class MainWindow(QMainWindow):
         self.code_frequency_action = QAction("&Code Frequency Report…", self)
         self.code_frequency_action.triggered.connect(self._on_code_frequency_report)
         view_menu.addAction(self.code_frequency_action)
+
+        self.code_user_frequency_action = QAction("Code/&User Frequency Report…", self)
+        self.code_user_frequency_action.triggered.connect(self._on_code_user_frequency_report)
+        view_menu.addAction(self.code_user_frequency_action)
 
     # -- Dialog-triggering slots -------------------------------------------
 
@@ -608,11 +643,70 @@ class MainWindow(QMainWindow):
         count = reporting.export_segments_json(self.conn, path_str)
         QMessageBox.information(self, "Export Complete", f"Exported {count} segment(s).")
 
+    def _on_export_code_frequency_csv(self) -> None:
+        if self.conn is None:
+            return
+        path_str, _ = QFileDialog.getSaveFileName(
+            self, "Export Code Frequency Report (CSV)", "", CSV_FILTER
+        )
+        if not path_str:
+            return
+        if not path_str.endswith(".csv"):
+            path_str += ".csv"
+        count = reporting.export_code_frequency_csv(self.conn, path_str)
+        QMessageBox.information(self, "Export Complete", f"Exported {count} code(s).")
+
+    def _on_export_code_frequency_json(self) -> None:
+        if self.conn is None:
+            return
+        path_str, _ = QFileDialog.getSaveFileName(
+            self, "Export Code Frequency Report (JSON)", "", JSON_FILTER
+        )
+        if not path_str:
+            return
+        if not path_str.endswith(".json"):
+            path_str += ".json"
+        count = reporting.export_code_frequency_json(self.conn, path_str)
+        QMessageBox.information(self, "Export Complete", f"Exported {count} code(s).")
+
+    def _on_export_code_user_frequency_csv(self) -> None:
+        if self.conn is None:
+            return
+        path_str, _ = QFileDialog.getSaveFileName(
+            self, "Export Code/User Frequency Report (CSV)", "", CSV_FILTER
+        )
+        if not path_str:
+            return
+        if not path_str.endswith(".csv"):
+            path_str += ".csv"
+        count = reporting.export_code_user_frequency_csv(self.conn, path_str)
+        QMessageBox.information(self, "Export Complete", f"Exported {count} row(s).")
+
+    def _on_export_code_user_frequency_json(self) -> None:
+        if self.conn is None:
+            return
+        path_str, _ = QFileDialog.getSaveFileName(
+            self, "Export Code/User Frequency Report (JSON)", "", JSON_FILTER
+        )
+        if not path_str:
+            return
+        if not path_str.endswith(".json"):
+            path_str += ".json"
+        count = reporting.export_code_user_frequency_json(self.conn, path_str)
+        QMessageBox.information(self, "Export Complete", f"Exported {count} row(s).")
+
     def _on_code_frequency_report(self) -> None:
         if self.conn is None:
             return
         rows = reporting.code_frequency(self.conn)
         dialog = CodeFrequencyDialog(rows, self)
+        dialog.exec()
+
+    def _on_code_user_frequency_report(self) -> None:
+        if self.conn is None:
+            return
+        rows = reporting.code_user_frequency(self.conn)
+        dialog = CodeUserFrequencyDialog(rows, self)
         dialog.exec()
 
     def _on_show_shortcuts(self) -> None:
@@ -1085,8 +1179,10 @@ class MainWindow(QMainWindow):
         self.import_action.setEnabled(has_project)
         self.export_csv_action.setEnabled(has_project)
         self.export_json_action.setEnabled(has_project)
+        self.export_code_frequency_menu.setEnabled(has_project)
         self.close_project_action.setEnabled(has_project)
         self.code_frequency_action.setEnabled(has_project)
+        self.code_user_frequency_action.setEnabled(has_project)
         self.project_section_action.setText(
             PROJECT_SECTION_LABEL_OPEN if has_project else PROJECT_SECTION_LABEL_CLOSED
         )
