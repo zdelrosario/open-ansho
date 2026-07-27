@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS codes (
     parent_id INTEGER REFERENCES codes(id) ON DELETE CASCADE,
     color TEXT,
     color_class TEXT,
+    description TEXT,
     created_at TEXT NOT NULL
 );
 
@@ -56,6 +57,7 @@ class Code:
     parent_id: int | None
     color: str | None
     color_class: str | None
+    description: str | None
     created_at: str
 
 
@@ -98,6 +100,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
     code_columns = {row["name"] for row in conn.execute("PRAGMA table_info(codes)")}
     if "color_class" not in code_columns:
         conn.execute("ALTER TABLE codes ADD COLUMN color_class TEXT")
+    if "description" not in code_columns:
+        conn.execute("ALTER TABLE codes ADD COLUMN description TEXT")
 
 
 def create_document(conn: sqlite3.Connection, name: str, content: str) -> Document:
@@ -139,10 +143,12 @@ def create_code(
     parent_id: int | None = None,
     color: str | None = None,
     color_class: str | None = None,
+    description: str | None = None,
 ) -> Code:
     cur = conn.execute(
-        "INSERT INTO codes (name, parent_id, color, color_class, created_at) VALUES (?, ?, ?, ?, ?)",
-        (name, parent_id, color, color_class, _now()),
+        "INSERT INTO codes (name, parent_id, color, color_class, description, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (name, parent_id, color, color_class, description, _now()),
     )
     conn.commit()
     return get_code(conn, cur.lastrowid)
@@ -160,6 +166,12 @@ def list_codes(conn: sqlite3.Connection) -> list[Code]:
 
 def rename_code(conn: sqlite3.Connection, code_id: int, name: str) -> Code:
     conn.execute("UPDATE codes SET name = ? WHERE id = ?", (name, code_id))
+    conn.commit()
+    return get_code(conn, code_id)
+
+
+def set_code_description(conn: sqlite3.Connection, code_id: int, description: str | None) -> Code:
+    conn.execute("UPDATE codes SET description = ? WHERE id = ?", (description, code_id))
     conn.commit()
     return get_code(conn, code_id)
 

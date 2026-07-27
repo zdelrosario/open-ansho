@@ -42,6 +42,26 @@ def test_rename_code_updates_tree_label(qtbot, tmp_path):
     assert window.code_tree.topLevelItem(0).text(0) == "Frustration"
 
 
+def test_edit_code_description_updates_tooltip(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.create_project(tmp_path / "project.sqlite")
+
+    code = window.add_code("Frustration")
+    item = window.code_tree.topLevelItem(0)
+    assert item.toolTip(0) == "(No code description)"
+
+    updated = window.edit_code_description(code.id, "Expressions of frustration.")
+
+    assert updated.description == "Expressions of frustration."
+    item = window.code_tree.topLevelItem(0)
+    assert item.toolTip(0) == "Expressions of frustration."
+
+    window.edit_code_description(code.id, "")
+    item = window.code_tree.topLevelItem(0)
+    assert item.toolTip(0) == "(No code description)"
+
+
 def test_set_code_base_color_assigns_chosen_class(qtbot, tmp_path):
     window = MainWindow()
     qtbot.addWidget(window)

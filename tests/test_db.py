@@ -51,6 +51,16 @@ def test_rename_code(conn):
     assert db.get_code(conn, code.id).name == "Frustration (renamed)"
 
 
+def test_set_code_description(conn):
+    code = db.create_code(conn, "Frustration")
+    assert code.description is None
+
+    updated = db.set_code_description(conn, code.id, "Expressions of frustration.")
+
+    assert updated.description == "Expressions of frustration."
+    assert db.get_code(conn, code.id).description == "Expressions of frustration."
+
+
 def test_set_code_parent_nests_a_top_level_code(conn):
     parent = db.create_code(conn, "Emotions")
     child = db.create_code(conn, "Frustration")

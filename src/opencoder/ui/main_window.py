@@ -620,6 +620,7 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
         new_child_action = menu.addAction("New Child Code…")
         rename_action = menu.addAction("Rename…")
+        edit_description_action = menu.addAction("Edit Description…")
 
         color_menu = menu.addMenu("Assign Base Color")
         color_menu.setEnabled(code is not None and code.parent_id is None)
@@ -652,6 +653,8 @@ class MainWindow(QMainWindow):
             self._on_new_child_code(code_id)
         elif chosen is rename_action:
             self._on_rename_code(code_id, item.text(0))
+        elif chosen is edit_description_action:
+            self._on_edit_code_description(code_id, code.description if code else None)
         elif chosen in color_actions:
             self.set_code_base_color(code_id, color_actions[chosen])
         elif chosen is delete_action:
@@ -668,6 +671,14 @@ class MainWindow(QMainWindow):
         if not ok or not name.strip():
             return
         self.rename_code(code_id, name.strip())
+
+    def _on_edit_code_description(self, code_id: int, current_description: str | None) -> None:
+        description, ok = QInputDialog.getMultiLineText(
+            self, "Edit Description", "Code description:", current_description or ""
+        )
+        if not ok:
+            return
+        self.edit_code_description(code_id, description.strip())
 
     def _on_delete_code(self, code_id: int, name: str) -> None:
         reply = QMessageBox.question(
@@ -849,6 +860,13 @@ class MainWindow(QMainWindow):
         if self.conn is None:
             raise RuntimeError("No project open")
         code = db.rename_code(self.conn, code_id, name)
+        self._refresh_codes()
+        return code
+
+    def edit_code_description(self, code_id: int, description: str) -> Code:
+        if self.conn is None:
+            raise RuntimeError("No project open")
+        code = db.set_code_description(self.conn, code_id, description or None)
         self._refresh_codes()
         return code
 
@@ -1176,6 +1194,9 @@ class MainWindow(QMainWindow):
                 item = QTreeWidgetItem([code.name, count_label])
                 item.setData(0, Qt.UserRole, code.id)
                 item.setTextAlignment(1, Qt.AlignRight | Qt.AlignVCenter)
+                tooltip = code.description.strip() if code.description else ""
+                item.setToolTip(0, tooltip or "(No code description)")
+                item.setToolTip(1, tooltip or "(No code description)")
                 if code.color:
                     item.setBackground(0, QColor(code.color))
                 self._code_items_by_id[code.id] = item
