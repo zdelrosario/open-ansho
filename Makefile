@@ -13,8 +13,10 @@ VENV := .venv
 
 ifeq ($(OS),Windows_NT)
     VENV_BIN := $(VENV)/Scripts
+    SYSTEM_PYTHON := python
 else
     VENV_BIN := $(VENV)/bin
+    SYSTEM_PYTHON := python3
 endif
 
 PYTHON := $(VENV_BIN)/python
@@ -35,7 +37,7 @@ help:
 	@echo "  clean          Remove build/dist artifacts and .spec files"
 
 $(VENV_BIN)/python:
-	python3 -m venv $(VENV)
+	$(SYSTEM_PYTHON) -m venv $(VENV)
 
 venv: $(VENV_BIN)/python
 
