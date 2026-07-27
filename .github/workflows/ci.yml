@@ -73,3 +73,49 @@ jobs:
         with:
           name: opencoder-${{ matrix.artifact }}
           path: dist/${{ matrix.artifact }}
+
+  # Persists every build's output to the `builds` branch so it survives past
+  # the 90-day artifact retention window. Only runs for pushes to main (not
+  # pull_request), since a PR's build shouldn't be written to a shared,
+  # permanent branch and forked PRs don't have write-token permissions anyway.
+  cache-builds:
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: opencoder-*
+          path: artifacts
+
+      - name: Commit builds to the builds branch
+        run: |
+          set -euo pipefail
+
+          REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          REPO_DIR="$(mktemp -d)"
+
+          if git clone --quiet --depth 1 --branch builds "$REMOTE" "$REPO_DIR" 2>/dev/null; then
+            :
+          else
+            git -C "$REPO_DIR" init --quiet
+            git -C "$REPO_DIR" checkout --quiet --orphan builds
+          fi
+
+          git -C "$REPO_DIR" config user.name "github-actions[bot]"
+          git -C "$REPO_DIR" config user.email "github-actions[bot]@users.noreply.github.com"
+
+          DEST="$REPO_DIR/runs/${GITHUB_RUN_NUMBER}-${GITHUB_SHA:0:7}"
+          mkdir -p "$DEST"
+          cp -r artifacts/opencoder-mac "$DEST/mac"
+          cp -r artifacts/opencoder-windows "$DEST/windows"
+          cp -r artifacts/opencoder-linux "$DEST/linux"
+
+          git -C "$REPO_DIR" add -A
+          git -C "$REPO_DIR" commit --quiet -m "Build for ${GITHUB_SHA} (run ${GITHUB_RUN_NUMBER})"
+          git -C "$REPO_DIR" push --quiet "$REMOTE" HEAD:builds
+        env:
+          GH_TOKEN: ${{ github.token }}
