@@ -70,6 +70,28 @@ def test_export_segments_json(conn, tmp_path):
     assert rows[0]["username"] == "alice"
 
 
+def test_export_treats_simultaneously_applied_codes_as_separate_rows(conn, tmp_path):
+    """Two codes applied to the same span (simultaneous coding) are two
+    separate segment rows in the DB, and must export as two separate rows
+    rather than being merged or having one overwrite the other."""
+    doc = db.create_document(conn, "interview.txt", "It was frustrating but rewarding.")
+    frustration = db.create_code(conn, "Frustration")
+    setting = db.create_code(conn, "Setting")
+    db.create_segment(conn, doc.id, frustration.id, 7, 18, created_by="alice")
+    db.create_segment(conn, doc.id, setting.id, 7, 18, created_by="alice")  # same span
+
+    out_path = tmp_path / "segments.csv"
+    count = reporting.export_segments_csv(conn, out_path)
+
+    assert count == 2
+    with open(out_path, newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+
+    assert len(rows) == 2
+    assert {row["code"] for row in rows} == {"Frustration", "Setting"}
+    assert all(row["text"] == "frustrating" for row in rows)
+
+
 def test_code_frequency_counts_and_orders_by_count_desc(conn):
     doc = db.create_document(conn, "interview.txt", "aaa bbb ccc")
     frequent = db.create_code(conn, "Frequent")

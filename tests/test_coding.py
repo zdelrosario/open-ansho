@@ -1,3 +1,6 @@
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QTextCursor
+
 from openansho import db
 from openansho.ui.main_window import BASE_COLOR_CLASSES
 from openansho.ui.main_window import MainWindow
@@ -100,7 +103,24 @@ def test_switching_documents_refreshes_highlights(qtbot, tmp_path):
     assert len(window.viewer._code_highlights) == 1
 
 
-def test_segment_at_viewer_cursor_prefers_shortest_overlap(qtbot, tmp_path):
+def test_coding_an_already_coded_segment_adds_a_second_code(qtbot, tmp_path):
+    """Simultaneous coding: applying a second code to an already-coded span
+    must add a second segment row, not replace the first."""
+    window = MainWindow()
+    qtbot.addWidget(window)
+    _open_project_with_document(window, tmp_path, content="Hello frustrating world.")
+
+    outer = window.add_code("Outer")
+    inner = window.add_code("Inner")
+    window.apply_segment(outer.id, 6, 16)  # "frustrating"
+    window.apply_segment(inner.id, 6, 16)  # same span, a second code
+
+    segments = db.list_segments_for_document(window.conn, window._current_document_id)
+    assert len(segments) == 2
+    assert {s.code_id for s in segments} == {outer.id, inner.id}
+
+
+def test_coded_segments_pane_shows_every_code_on_the_segment_at_the_cursor(qtbot, tmp_path):
     window = MainWindow()
     qtbot.addWidget(window)
     _open_project_with_document(window, tmp_path, content="Hello frustrating world.")
@@ -108,14 +128,46 @@ def test_segment_at_viewer_cursor_prefers_shortest_overlap(qtbot, tmp_path):
     outer = window.add_code("Outer")
     inner = window.add_code("Inner")
     window.apply_segment(outer.id, 0, 24)  # "Hello frustrating world"
-    window.apply_segment(inner.id, 6, 16)  # "frustrating"
+    window.apply_segment(inner.id, 6, 16)  # "frustrating", nested inside outer
 
     cursor = window.viewer.textCursor()
     cursor.setPosition(8)
     window.viewer.setTextCursor(cursor)
 
-    segment = window._segment_at_viewer_cursor()
-    assert segment.code_id == inner.id
+    # Cursor-driven grouping (see _on_viewer_cursor_moved) is normally
+    # triggered by the viewer having real window focus; drive the render
+    # directly here so the test doesn't depend on a shown top-level window.
+    window._segments_panel_mode = "cursor"
+    window._render_segments_panel()
+
+    headers = [
+        window.segment_list.item(i).text()
+        for i in range(window.segment_list.count())
+        if window.segment_list.item(i).data(Qt.UserRole)[0] == "code_header"
+    ]
+    assert set(headers) == {"Outer", "Inner"}
+
+
+def test_remove_code_from_selection_only_deletes_that_codes_segment(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    _open_project_with_document(window, tmp_path, content="Hello frustrating world.")
+
+    outer = window.add_code("Outer")
+    inner = window.add_code("Inner")
+    window.apply_segment(outer.id, 6, 16)
+    window.apply_segment(inner.id, 6, 16)
+
+    cursor = window.viewer.textCursor()
+    cursor.setPosition(6)
+    cursor.setPosition(16, QTextCursor.KeepAnchor)
+    window.viewer.setTextCursor(cursor)
+
+    window._remove_code_from_viewer_selection(inner.id)
+
+    segments = db.list_segments_for_document(window.conn, window._current_document_id)
+    assert len(segments) == 1
+    assert segments[0].code_id == outer.id
 
 
 def test_apply_code_button_noop_without_selection(qtbot, tmp_path, monkeypatch):

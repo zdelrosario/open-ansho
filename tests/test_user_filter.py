@@ -324,7 +324,10 @@ def test_non_overlapping_segments_with_different_codes_are_not_outlined(qtbot, t
     assert not any(h.outlined for h in highlights)
 
 
-def test_overlapping_different_codes_not_outlined_when_only_one_user_selected(qtbot, tmp_path):
+def test_overlapping_different_codes_from_the_same_user_are_not_outlined(qtbot, tmp_path):
+    """Simultaneous coding: one user applying two codes to overlapping (or
+    identical) spans is intentional, additive coding, not a conflict, so it
+    does NOT get the red outline reserved for cross-user disagreement."""
     window = _setup_project_with_document(qtbot, tmp_path)
     frustration = window.add_code("Frustration")
     setting = window.add_code("Setting")

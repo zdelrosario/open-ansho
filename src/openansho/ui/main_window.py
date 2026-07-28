@@ -246,6 +246,12 @@ class MainWindow(QMainWindow):
         self._code_items_by_id: dict[int, QTreeWidgetItem] = {}
         self._new_code_item: QTreeWidgetItem | None = None
         self._last_selected_code_id: int | None = None
+        # "code": browsing every segment coded with a single code (picked from
+        # the codebook tree), across the whole document. "cursor": showing
+        # every code applied to whatever the viewer's cursor/selection is
+        # currently touching, so simultaneously-applied codes on the same
+        # span are all visible at once instead of only the most recent.
+        self._segments_panel_mode: str = "code"
         self._segments_panel_code_id: int | None = None
         self._user_filter_overrides: dict[str, bool] = {}
 
@@ -269,6 +275,8 @@ class MainWindow(QMainWindow):
         self.segment_list = QListWidget()
         self.segment_list.setObjectName("segmentListPane")
         self.segment_list.itemDoubleClicked.connect(self._on_segment_activated)
+        self.segment_list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.segment_list.customContextMenuRequested.connect(self._on_segment_list_context_menu)
 
         self.user_filter_combo = CheckableComboBox()
         self.user_filter_combo.model().dataChanged.connect(self._on_user_filter_changed)
@@ -683,9 +691,7 @@ class MainWindow(QMainWindow):
         if code_item is None:
             QMessageBox.information(self, "No Code Selected", "Select a code to apply first.")
             return
-        self.apply_segment(
-            code_item.data(0, Qt.UserRole), cursor.selectionStart(), cursor.selectionEnd()
-        )
+        self._apply_code_to_viewer_selection(code_item.data(0, Qt.UserRole))
 
     def _on_code_context_menu(self, pos) -> None:
         if self.conn is None:
@@ -774,15 +780,37 @@ class MainWindow(QMainWindow):
 
     def _on_segment_activated(self, item: QListWidgetItem) -> None:
         data = item.data(Qt.UserRole)
-        if data is None:
-            return  # a group header in the multi-user grouped view, not a segment
-        document_id, start, end = data
+        if data is None or data[0] != "segment":
+            return  # a group header in the grouped-by-code view, not a segment
+        _, document_id, start, end, _code_id = data
         self._select_document(document_id)
         cursor = self.viewer.textCursor()
         cursor.setPosition(start)
         cursor.setPosition(end, QTextCursor.KeepAnchor)
         self.viewer.setTextCursor(cursor)
         self.viewer.ensureCursorVisible()
+
+    def _on_segment_list_context_menu(self, pos) -> None:
+        if self.conn is None:
+            return
+        item = self.segment_list.itemAt(pos)
+        if item is None:
+            return
+        data = item.data(Qt.UserRole)
+        if data is None:
+            return
+        if data[0] == "code_header":
+            code_id = data[1]
+        elif data[0] == "segment":
+            code_id = data[4]
+        else:
+            return
+
+        menu = QMenu(self)
+        remove_action = menu.addAction("Remove code from selection in Text Pane")
+        chosen = menu.exec(self.segment_list.viewport().mapToGlobal(pos))
+        if chosen is remove_action:
+            self._remove_code_from_viewer_selection(code_id)
 
     def _on_export_csv(self) -> None:
         if self.conn is None:
@@ -1064,6 +1092,11 @@ class MainWindow(QMainWindow):
         if not cursor.hasSelection():
             return False
         self.apply_segment(code_id, cursor.selectionStart(), cursor.selectionEnd())
+        # Show every code now applied to this span (not just the one just
+        # applied), so simultaneously-coding an already-coded segment is
+        # visibly additive rather than looking like a replacement.
+        self._segments_panel_mode = "cursor"
+        self._render_segments_panel()
         return True
 
     def _delete_segments_at_cursor(self) -> None:
@@ -1079,6 +1112,7 @@ class MainWindow(QMainWindow):
         self._refresh_user_filter()
         self._refresh_codes()
         self._refresh_highlights()
+        self._segments_panel_mode = "cursor"
         self._render_segments_panel()
 
     def _delete_segments_in_viewer_selection(self) -> None:
@@ -1097,6 +1131,29 @@ class MainWindow(QMainWindow):
         self._refresh_user_filter()
         self._refresh_codes()
         self._refresh_highlights()
+        self._segments_panel_mode = "cursor"
+        self._render_segments_panel()
+
+    def _remove_code_from_viewer_selection(self, code_id: int) -> None:
+        """Delete only `code_id`'s segment(s) touching the viewer's current
+        cursor/selection, leaving any other simultaneously-applied codes on
+        the same span intact. Used by the Coded Segments pane's right-click
+        "Remove code from selection in Text Pane" action."""
+        if self.conn is None or self._current_document_id is None:
+            return
+        matching = [
+            segment
+            for segment in self._segments_overlapping_viewer_selection()
+            if segment.code_id == code_id
+        ]
+        if not matching:
+            return
+        for segment in matching:
+            db.delete_segment(self.conn, segment.id)
+        self._refresh_user_filter()
+        self._refresh_codes()
+        self._refresh_highlights()
+        self._segments_panel_mode = "cursor"
         self._render_segments_panel()
 
     def _jump_to_adjacent_segment(self, direction: int) -> None:
@@ -1332,9 +1389,7 @@ class MainWindow(QMainWindow):
         band_index_by_username = {name: index for index, name in enumerate(ordered_usernames)}
         band_count = max(len(ordered_usernames), 1)
 
-        conflicting_segment_ids = (
-            self._overlapping_different_code_segment_ids(segments) if band_count > 1 else set()
-        )
+        conflicting_segment_ids = self._overlapping_different_code_segment_ids(segments)
 
         highlights = []
         for segment in segments:
@@ -1357,51 +1412,43 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _overlapping_different_code_segment_ids(segments: list[db.Segment]) -> set[int]:
-        """IDs of segments that overlap another segment coded with a different code.
-
-        Only meaningful when multiple users are selected: segments from a
-        single user are already visually distinguished per-code (and this
-        matches the app's existing overlap handling, which this doesn't
-        change), so conflicts are only flagged across the combined set.
-        """
+        """IDs of segments that overlap another segment coded with a different
+        code by a different user — i.e. users disagreeing on how to code a
+        span. The same user applying more than one code to the same span is
+        simultaneous coding, not a conflict, so it's excluded."""
         conflicting: set[int] = set()
         for i, a in enumerate(segments):
             for b in segments[i + 1 :]:
                 if a.code_id == b.code_id:
+                    continue
+                if (a.created_by or "") == (b.created_by or ""):
                     continue
                 if a.start_offset < b.end_offset and b.start_offset < a.end_offset:
                     conflicting.add(a.id)
                     conflicting.add(b.id)
         return conflicting
 
-    def _segment_at_viewer_cursor(self) -> db.Segment | None:
-        if self.conn is None or self._current_document_id is None:
-            return None
-        selected_usernames = self._selected_usernames()
-        position = self.viewer.textCursor().position()
-        overlapping = [
-            segment
-            for segment in db.list_segments_for_document(self.conn, self._current_document_id)
-            if segment.start_offset <= position < segment.end_offset
-            and (segment.created_by or "") in selected_usernames
-        ]
-        if not overlapping:
-            return None
-        return min(overlapping, key=lambda s: s.end_offset - s.start_offset)
-
     def _on_viewer_cursor_moved(self) -> None:
         if len(self._selected_usernames()) > 1:
+            self._segments_panel_mode = "cursor"
             self._render_segments_panel()
             return
         if QApplication.focusWidget() is self.viewer:
-            segment = self._segment_at_viewer_cursor()
-            if segment is not None:
-                self._show_segments_for_code(segment.code_id)
+            selected_usernames = self._selected_usernames()
+            segments = [
+                segment
+                for segment in self._segments_overlapping_viewer_selection()
+                if (segment.created_by or "") in selected_usernames
+            ]
+            if segments:
+                self._segments_panel_mode = "cursor"
+                self._render_segments_panel()
                 return
         item = self.code_tree.currentItem()
         self._show_segments_for_code(item.data(0, Qt.UserRole) if item is not None else None)
 
     def _show_segments_for_code(self, code_id: int | None) -> None:
+        self._segments_panel_mode = "code"
         self._segments_panel_code_id = code_id
         self._render_segments_panel()
 
@@ -1427,8 +1474,20 @@ class MainWindow(QMainWindow):
         selected_usernames = self._selected_usernames()
         documents_by_id = {doc.id: doc for doc in db.list_documents(self.conn)}
 
-        if len(selected_usernames) > 1:
-            self._render_segments_panel_grouped_by_code(selected_usernames, documents_by_id)
+        # Multiple selected users always show the cursor/selection-driven
+        # grouped view (comparing everyone's codes at that span); a single
+        # user only does when the last panel-affecting action was a viewer
+        # cursor/selection move that landed on a coded span (see
+        # _on_viewer_cursor_moved) rather than a codebook click.
+        if len(selected_usernames) > 1 or self._segments_panel_mode == "cursor":
+            self.segment_code_label.clear()
+            self.segment_code_label.setStyleSheet("")
+            segments = [
+                segment
+                for segment in self._segments_overlapping_viewer_selection()
+                if (segment.created_by or "") in selected_usernames
+            ]
+            self._render_segments_grouped_by_code(segments, documents_by_id)
             return
 
         code_id = self._segments_panel_code_id
@@ -1457,21 +1516,15 @@ class MainWindow(QMainWindow):
         ]
         segments.sort(key=lambda s: s.document_id != self._current_document_id)
         for segment in segments:
-            self._add_segment_list_item(segment, documents_by_id)
+            self._add_segment_list_item(segment, documents_by_id, code_id)
 
-    def _render_segments_panel_grouped_by_code(
-        self, selected_usernames: set[str], documents_by_id: dict[int, db.Document]
+    def _render_segments_grouped_by_code(
+        self, segments: list[db.Segment], documents_by_id: dict[int, db.Document]
     ) -> None:
-        """Multi-user mode: only segments touching the viewer's cursor/selection,
-        grouped under a colored header per code instead of a single code context."""
-        self.segment_code_label.clear()
-        self.segment_code_label.setStyleSheet("")
-
-        segments = [
-            segment
-            for segment in self._segments_overlapping_viewer_selection()
-            if (segment.created_by or "") in selected_usernames
-        ]
+        """Show every code applied to `segments`, one colored header per code
+        followed by its segments — so codes applied simultaneously to the
+        same span (or by different users) are all visible at once, instead
+        of only a single code at a time."""
         if not segments:
             return
 
@@ -1488,6 +1541,7 @@ class MainWindow(QMainWindow):
             code = codes_by_id.get(code_id)
             header_item = QListWidgetItem(code_name(code_id))
             header_item.setFlags(Qt.NoItemFlags)
+            header_item.setData(Qt.UserRole, ("code_header", code_id))
             if code and code.color:
                 header_item.setBackground(QColor(code.color))
                 header_item.setForeground(CODE_NAME_TEXT_COLOR)
@@ -1497,10 +1551,10 @@ class MainWindow(QMainWindow):
                 segments_by_code[code_id], key=lambda s: s.document_id != self._current_document_id
             )
             for segment in group_segments:
-                self._add_segment_list_item(segment, documents_by_id)
+                self._add_segment_list_item(segment, documents_by_id, code_id)
 
     def _add_segment_list_item(
-        self, segment: db.Segment, documents_by_id: dict[int, db.Document]
+        self, segment: db.Segment, documents_by_id: dict[int, db.Document], code_id: int
     ) -> None:
         doc = documents_by_id.get(segment.document_id)
         doc_name = doc.name if doc else "?"
@@ -1512,7 +1566,8 @@ class MainWindow(QMainWindow):
 
         list_item = QListWidgetItem(f"“{snippet}” [{doc_name}, {username}]")
         list_item.setData(
-            Qt.UserRole, (segment.document_id, segment.start_offset, segment.end_offset)
+            Qt.UserRole,
+            ("segment", segment.document_id, segment.start_offset, segment.end_offset, code_id),
         )
         list_item.setToolTip(_segment_tooltip(full_text, doc_name, username))
         if segment.document_id != self._current_document_id:
