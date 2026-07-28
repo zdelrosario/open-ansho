@@ -33,6 +33,7 @@ from openansho.db import Code
 from openansho.ui.checkable_combo_box import CheckableComboBox
 from openansho.ui.code_filter_input import CodeFilterLineEdit
 from openansho.ui.code_tree import CodeTreeWidget
+from openansho.ui.os_theme import detect_dark_mode
 from openansho.ui.preferences_dialog import PreferencesDialog
 from openansho.ui.report_dialog import CodeFrequencyDialog, CodeUserFrequencyDialog
 from openansho.ui.shortcuts_dialog import ShortcutsDialog
@@ -200,7 +201,10 @@ class MainWindow(QMainWindow):
         self._current_document_id: int | None = None
         self._code_sort_mode: str = CODE_SORT_ALPHABETICAL
         self._settings = QSettings(SETTINGS_ORGANIZATION, SETTINGS_APPLICATION)
-        self._dark_mode: bool = self._settings.value(DARK_MODE_KEY, False, type=bool)
+        if self._settings.contains(DARK_MODE_KEY):
+            self._dark_mode: bool = self._settings.value(DARK_MODE_KEY, type=bool)
+        else:
+            self._dark_mode = detect_dark_mode()
 
         self.setWindowTitle("OpenAnsho")
         self.resize(1150, 650)
