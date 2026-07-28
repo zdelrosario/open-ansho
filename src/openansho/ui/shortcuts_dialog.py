@@ -41,7 +41,7 @@ SHORTCUT_SECTIONS = [
     (
         "Code filter",
         [
-            ("Up / Down", "Cycle matched codes"),
+            ("Up / Down", "Cycle matched codes, including \"(add new code)\" when shown"),
             ("Enter", "Apply the matched code, or create a new code"),
         ],
     ),

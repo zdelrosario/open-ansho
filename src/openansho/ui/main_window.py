@@ -6,7 +6,7 @@ import sqlite3
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QSettings, Qt
-from PySide6.QtGui import QAction, QColor, QTextCursor
+from PySide6.QtGui import QAction, QColor, QFont, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -93,6 +93,9 @@ SNIPPET_MAX_LENGTH = 60
 TOOLTIP_MAX_WIDTH_PX = 400
 OTHER_DOCUMENT_TEXT_COLOR = QColor(150, 150, 150)
 CODE_NAME_TEXT_COLOR = QColor(255, 255, 255)
+
+NEW_CODE_LABEL = "(add new code)"
+NEW_CODE_MARKER = "__new_code_marker__"
 
 CODE_SORT_ALPHABETICAL = "alphabetical"
 CODE_SORT_CURRENT_DOCUMENT = "current_document"
@@ -233,6 +236,7 @@ class MainWindow(QMainWindow):
         self.code_tree.codeReparented.connect(self._on_code_reparented)
 
         self._code_items_by_id: dict[int, QTreeWidgetItem] = {}
+        self._new_code_item: QTreeWidgetItem | None = None
         self._last_selected_code_id: int | None = None
         self._segments_panel_code_id: int | None = None
         self._user_filter_overrides: dict[str, bool] = {}
@@ -332,6 +336,7 @@ class MainWindow(QMainWindow):
             pane.setProperty("focused", focused)
             pane.style().unpolish(pane)
             pane.style().polish(pane)
+        self._update_new_code_placeholder()
 
     def eventFilter(self, watched, event) -> bool:
         if event.type() == QEvent.KeyPress:
@@ -620,6 +625,7 @@ class MainWindow(QMainWindow):
 
     def _on_code_filter_changed(self, text: str) -> None:
         self._apply_code_filter(text)
+        self._update_new_code_placeholder()
         self._sync_matched_code_selection()
 
     def _on_code_filter_cycle(self, direction: int) -> None:
@@ -632,6 +638,10 @@ class MainWindow(QMainWindow):
         if not text:
             return
 
+        if self._new_code_item is not None and self.code_tree.currentItem() is self._new_code_item:
+            self._create_and_apply_new_code(text)
+            return
+
         matches = self._matching_code_items(text)
         if matches:
             code_id = self._current_or_first_match_id(matches)
@@ -642,6 +652,9 @@ class MainWindow(QMainWindow):
                 self._select_code(code_id)
             return
 
+        self._create_and_apply_new_code(text)
+
+    def _create_and_apply_new_code(self, text: str) -> None:
         code = self.add_code(text)
         self.code_filter_input.clear()
         self._select_code(code.id)
@@ -1242,6 +1255,7 @@ class MainWindow(QMainWindow):
         self.code_tree.clear()
         self.segment_list.clear()
         self._code_items_by_id = {}
+        self._new_code_item = None
         if self.conn is None:
             return
 
@@ -1287,6 +1301,7 @@ class MainWindow(QMainWindow):
             if restored is not None:
                 self.code_tree.setCurrentItem(restored)
         self._apply_code_filter(self.code_filter_input.text())
+        self._update_new_code_placeholder()
         self._sync_matched_code_selection()
 
     def _refresh_highlights(self) -> None:
@@ -1498,7 +1513,10 @@ class MainWindow(QMainWindow):
     def _apply_code_filter(self, text: str) -> None:
         query = text.strip().lower()
         for row in range(self.code_tree.topLevelItemCount()):
-            _apply_filter_to_item(self.code_tree.topLevelItem(row), query)
+            item = self.code_tree.topLevelItem(row)
+            if item is self._new_code_item:
+                continue
+            _apply_filter_to_item(item, query)
 
     def _matching_code_items(self, text: str) -> list[QTreeWidgetItem]:
         """Codes matching `text`; an empty/blank query matches every code."""
@@ -1507,6 +1525,8 @@ class MainWindow(QMainWindow):
         matches: list[QTreeWidgetItem] = []
 
         def walk(item: QTreeWidgetItem) -> None:
+            if item is self._new_code_item:
+                return
             if not query or query in item.text(0).lower():
                 matches.append(item)
             for row in range(item.childCount()):
@@ -1515,6 +1535,45 @@ class MainWindow(QMainWindow):
         for row in range(self.code_tree.topLevelItemCount()):
             walk(self.code_tree.topLevelItem(row))
         return matches
+
+    def _code_name_exists(self, text: str) -> bool:
+        lowered = text.lower()
+        return any(item.text(0).lower() == lowered for item in self._code_items_by_id.values())
+
+    def _update_new_code_placeholder(self) -> None:
+        """Show/hide the "(add new code)" affordance in the code tree.
+
+        It only belongs at the top of the list while the filter field is
+        focused, holds non-empty text, and that text isn't an exact match
+        for an existing code — otherwise Enter should act on a real code.
+        """
+        had_placeholder_selected = (
+            self._new_code_item is not None
+            and self.code_tree.currentItem() is self._new_code_item
+        )
+        if self._new_code_item is not None:
+            index = self.code_tree.indexOfTopLevelItem(self._new_code_item)
+            if index != -1:
+                self.code_tree.takeTopLevelItem(index)
+            self._new_code_item = None
+
+        if self.conn is None or QApplication.focusWidget() is not self.code_filter_input:
+            return
+        text = self.code_filter_input.text().strip()
+        if not text or self._code_name_exists(text):
+            return
+
+        item = QTreeWidgetItem([NEW_CODE_LABEL, ""])
+        item.setData(0, Qt.UserRole, NEW_CODE_MARKER)
+        item.setFlags((item.flags() & ~Qt.ItemIsDragEnabled) & ~Qt.ItemIsDropEnabled)
+        font = item.font(0)
+        font.setItalic(True)
+        item.setFont(0, font)
+        item.setForeground(0, OTHER_DOCUMENT_TEXT_COLOR)
+        self.code_tree.insertTopLevelItem(0, item)
+        self._new_code_item = item
+        if had_placeholder_selected:
+            self.code_tree.setCurrentItem(item)
 
     def _current_or_first_match_id(self, matches: list[QTreeWidgetItem]) -> int:
         current = self.code_tree.currentItem()
@@ -1526,17 +1585,21 @@ class MainWindow(QMainWindow):
         text = self.code_filter_input.text().strip()
         if not text:
             return
+        current = self.code_tree.currentItem()
+        if current is not None and current is self._new_code_item:
+            return
         matches = self._matching_code_items(text)
         if not matches:
             self.code_tree.setCurrentItem(None)
             return
-        current = self.code_tree.currentItem()
         if current in matches:
             return
         self.code_tree.setCurrentItem(matches[0])
 
     def _cycle_matched_code(self, direction: int) -> None:
         matches = self._matching_code_items(self.code_filter_input.text())
+        if self._new_code_item is not None:
+            matches = [self._new_code_item, *matches]
         if not matches:
             return
         current = self.code_tree.currentItem()
