@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 
 from PySide6.QtCore import QRect, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPalette, QPen, QTextCharFormat, QTextCursor
+from PySide6.QtGui import QColor, QPainter, QPen, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import QPlainTextEdit, QTextEdit
 
 CONFLICT_OUTLINE_COLOR = QColor("red")
@@ -105,11 +105,18 @@ class VimTextViewer(QPlainTextEdit):
         self._refresh_extra_selections()
 
     def set_theme(self, dark_mode: bool) -> None:
-        """Set the block cursor / visual-mode selection colors for the given theme.
+        """Set the block cursor colors for the given theme.
 
-        Both should read as inverted relative to the surrounding pane, so the
+        Should read as inverted relative to the surrounding pane, so the
         cursor stays visible against either a black (dark mode) or white
         (light mode) background.
+
+        Visual-mode selection color is set via QSS (`selection-background-color`/
+        `selection-color` on #viewerPane in main_window.py), not QPalette here:
+        a QPalette::Highlight set before the widget's first show gets silently
+        discarded by the stylesheet's first polish pass, which otherwise
+        defaults the native selection to the same colors as ordinary text —
+        making visual-mode selections invisible.
         """
         if dark_mode:
             self._cursor_bg = QColor(255, 255, 255)
@@ -117,13 +124,6 @@ class VimTextViewer(QPlainTextEdit):
         else:
             self._cursor_bg = QColor(0, 0, 0)
             self._cursor_fg = QColor(255, 255, 255)
-
-        # Visual-mode selection uses Qt's native text-selection rendering
-        # (QPalette::Highlight/HighlightedText).
-        palette = self.palette()
-        palette.setColor(QPalette.Highlight, self._cursor_bg)
-        palette.setColor(QPalette.HighlightedText, self._cursor_fg)
-        self.setPalette(palette)
 
         self._refresh_extra_selections()
 

@@ -140,6 +140,10 @@ QLineEdit, QPlainTextEdit, QTreeWidget, QListWidget, QComboBox, QHeaderView::sec
 QTreeWidget::item:selected, QListWidget::item:selected {
     background-color: #333333;
 }
+QPlainTextEdit#viewerPane {
+    selection-background-color: #ffffff;
+    selection-color: #000000;
+}
 """
 
 LIGHT_THEME_STYLE = """
@@ -161,6 +165,10 @@ QLineEdit, QPlainTextEdit, QTreeWidget, QListWidget, QComboBox, QHeaderView::sec
 }
 QTreeWidget::item:selected, QListWidget::item:selected {
     background-color: #d0e8ff;
+}
+QPlainTextEdit#viewerPane {
+    selection-background-color: #000000;
+    selection-color: #ffffff;
 }
 """
 

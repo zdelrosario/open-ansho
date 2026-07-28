@@ -1,5 +1,14 @@
+from PySide6.QtCore import QSettings
+from PySide6.QtGui import QPalette
+
 from openansho import db
-from openansho.ui.main_window import MainWindow
+from openansho.ui import main_window as main_window_module
+from openansho.ui.main_window import (
+    DARK_MODE_KEY,
+    SETTINGS_APPLICATION,
+    SETTINGS_ORGANIZATION,
+    MainWindow,
+)
 
 
 def test_new_window_has_import_disabled(qtbot):
@@ -100,3 +109,35 @@ def test_selecting_document_updates_viewer(qtbot, tmp_path):
 
     window.document_list.setCurrentRow(1)
     assert window.viewer.toPlainText() == "Content B"
+
+
+def test_dark_mode_at_startup_keeps_visual_selection_visible(qtbot, tmp_path, monkeypatch):
+    """Regression test: when the OS is already in Dark Mode at launch (so the
+    window opens straight into dark mode, with no explicit toggle), the
+    viewer's native text-selection highlight used to end up the same color
+    as ordinary text once the window was first shown, making a visual-mode
+    selection invisible. See VimTextViewer.set_theme.
+    """
+    monkeypatch.setattr(main_window_module, "detect_dark_mode", lambda: True)
+    settings = QSettings(SETTINGS_ORGANIZATION, SETTINGS_APPLICATION)
+    settings.remove(DARK_MODE_KEY)
+
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.create_project(tmp_path / "project.sqlite")
+    doc_path = tmp_path / "doc.txt"
+    doc_path.write_text("hello world", encoding="utf-8")
+    window.import_document(doc_path)
+
+    window.show()
+    window.document_list.setCurrentRow(0)
+    # The bug only manifests once the stylesheet's deferred repolish is
+    # actually delivered through the event loop, which a bare .show() does
+    # not force by itself.
+    qtbot.wait(100)
+
+    palette = window.viewer.palette()
+    assert palette.color(QPalette.Highlight) != palette.color(QPalette.Base)
+    assert palette.color(QPalette.HighlightedText) != palette.color(QPalette.Text)
+
+    settings.remove(DARK_MODE_KEY)
