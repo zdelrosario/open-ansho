@@ -491,6 +491,7 @@ class MainWindow(QMainWindow):
         settings_menu = self.menuBar().addMenu("&Settings")
 
         preferences_action = QAction("&Preferences…", self)
+        preferences_action.setMenuRole(QAction.MenuRole.NoRole)
         preferences_action.triggered.connect(self._on_show_preferences)
         settings_menu.addAction(preferences_action)
 
