@@ -33,6 +33,7 @@ from openansho.db import Code
 from openansho.ui.checkable_combo_box import CheckableComboBox
 from openansho.ui.code_filter_input import CodeFilterLineEdit
 from openansho.ui.code_tree import CodeTreeWidget
+from openansho.ui.preferences_dialog import PreferencesDialog
 from openansho.ui.report_dialog import CodeFrequencyDialog, CodeUserFrequencyDialog
 from openansho.ui.shortcuts_dialog import ShortcutsDialog
 from openansho.ui.vim_viewer import CodeHighlight, VimTextViewer
@@ -51,6 +52,7 @@ SETTINGS_ORGANIZATION = "OpenAnsho"
 SETTINGS_APPLICATION = "OpenAnsho"
 RECENT_PROJECTS_KEY = "recentProjects"
 MAX_RECENT_PROJECTS = 10
+DARK_MODE_KEY = "darkMode"
 
 BASE_COLOR_CLASSES = [
     "#D81B60",
@@ -114,6 +116,50 @@ QListWidget#segmentListPane[focused="true"] {
 }
 """
 
+DARK_THEME_STYLE = """
+QWidget {
+    background-color: #000000;
+    color: #ffffff;
+}
+QMenuBar, QMenu, QMenu::item {
+    background-color: #000000;
+    color: #ffffff;
+}
+QMenu::item:selected {
+    background-color: #333333;
+}
+QLineEdit, QPlainTextEdit, QTreeWidget, QListWidget, QComboBox, QHeaderView::section, QPushButton {
+    background-color: #000000;
+    color: #ffffff;
+    border: 1px solid #444444;
+}
+QTreeWidget::item:selected, QListWidget::item:selected {
+    background-color: #333333;
+}
+"""
+
+LIGHT_THEME_STYLE = """
+QWidget {
+    background-color: #ffffff;
+    color: #000000;
+}
+QMenuBar, QMenu, QMenu::item {
+    background-color: #ffffff;
+    color: #000000;
+}
+QMenu::item:selected {
+    background-color: #e0e0e0;
+}
+QLineEdit, QPlainTextEdit, QTreeWidget, QListWidget, QComboBox, QHeaderView::section, QPushButton {
+    background-color: #ffffff;
+    color: #000000;
+    border: 1px solid #cccccc;
+}
+QTreeWidget::item:selected, QListWidget::item:selected {
+    background-color: #d0e8ff;
+}
+"""
+
 
 def _apply_filter_to_item(item: QTreeWidgetItem, query: str) -> bool:
     """Hide items that don't match `query` and have no matching descendant.
@@ -154,6 +200,7 @@ class MainWindow(QMainWindow):
         self._current_document_id: int | None = None
         self._code_sort_mode: str = CODE_SORT_ALPHABETICAL
         self._settings = QSettings(SETTINGS_ORGANIZATION, SETTINGS_APPLICATION)
+        self._dark_mode: bool = self._settings.value(DARK_MODE_KEY, False, type=bool)
 
         self.setWindowTitle("OpenAnsho")
         self.resize(1150, 650)
@@ -264,7 +311,7 @@ class MainWindow(QMainWindow):
         self.search_label = QLabel()
         self.statusBar().addPermanentWidget(self.search_label)
 
-        self.setStyleSheet(PANE_FOCUS_STYLE)
+        self._apply_theme()
         self._panes = (self.document_list, self.viewer, self.code_tree, self.segment_list)
 
         QApplication.instance().installEventFilter(self)
@@ -431,6 +478,12 @@ class MainWindow(QMainWindow):
         self.code_user_frequency_action = QAction("Code/&User Frequency Report…", self)
         self.code_user_frequency_action.triggered.connect(self._on_code_user_frequency_report)
         view_menu.addAction(self.code_user_frequency_action)
+
+        settings_menu = self.menuBar().addMenu("&Settings")
+
+        preferences_action = QAction("&Preferences…", self)
+        preferences_action.triggered.connect(self._on_show_preferences)
+        settings_menu.addAction(preferences_action)
 
     # -- Dialog-triggering slots -------------------------------------------
 
@@ -797,7 +850,23 @@ class MainWindow(QMainWindow):
         dialog = ShortcutsDialog(self)
         dialog.exec()
 
+    def _on_show_preferences(self) -> None:
+        dialog = PreferencesDialog(self._dark_mode, self)
+        dialog.darkModeToggled.connect(self.set_dark_mode)
+        dialog.exec()
+
     # -- Testable logic, independent of QFileDialog / QMessageBox ---------
+
+    def set_dark_mode(self, enabled: bool) -> None:
+        self._dark_mode = enabled
+        self._settings.setValue(DARK_MODE_KEY, enabled)
+        self._apply_theme()
+
+    def _apply_theme(self) -> None:
+        theme_style = DARK_THEME_STYLE if self._dark_mode else LIGHT_THEME_STYLE
+        self.setStyleSheet(theme_style + PANE_FOCUS_STYLE)
+        self.viewer.set_theme(self._dark_mode)
+
 
     def create_project(self, path: Path) -> None:
         if path.exists():

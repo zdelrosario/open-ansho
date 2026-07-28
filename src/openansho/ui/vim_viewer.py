@@ -91,14 +91,6 @@ class VimTextViewer(QPlainTextEdit):
         self.setReadOnly(True)
         self.setCursorWidth(0)  # we render our own block cursor instead
 
-        # Visual-mode selection uses Qt's native text-selection rendering
-        # (QPalette::Highlight/HighlightedText), which defaults to a blue
-        # background with white text on most platforms.
-        palette = self.palette()
-        palette.setColor(QPalette.Highlight, QColor(255, 255, 255))
-        palette.setColor(QPalette.HighlightedText, QColor(0, 0, 0))
-        self.setPalette(palette)
-
         self.mode = self.NORMAL
         self._pending_g = False
         self._pending_find: int | None = None
@@ -107,7 +99,32 @@ class VimTextViewer(QPlainTextEdit):
         self._search_buffer = ""
         self._search_origin = 0
 
+        self.set_theme(dark_mode=False)
+
         self.cursorPositionChanged.connect(self._refresh_extra_selections)
+        self._refresh_extra_selections()
+
+    def set_theme(self, dark_mode: bool) -> None:
+        """Set the block cursor / visual-mode selection colors for the given theme.
+
+        Both should read as inverted relative to the surrounding pane, so the
+        cursor stays visible against either a black (dark mode) or white
+        (light mode) background.
+        """
+        if dark_mode:
+            self._cursor_bg = QColor(255, 255, 255)
+            self._cursor_fg = QColor(0, 0, 0)
+        else:
+            self._cursor_bg = QColor(0, 0, 0)
+            self._cursor_fg = QColor(255, 255, 255)
+
+        # Visual-mode selection uses Qt's native text-selection rendering
+        # (QPalette::Highlight/HighlightedText).
+        palette = self.palette()
+        palette.setColor(QPalette.Highlight, self._cursor_bg)
+        palette.setColor(QPalette.HighlightedText, self._cursor_fg)
+        self.setPalette(palette)
+
         self._refresh_extra_selections()
 
     def set_code_highlights(self, highlights: list[CodeHighlight]) -> None:
@@ -647,8 +664,8 @@ class VimTextViewer(QPlainTextEdit):
             block_cursor.movePosition(QTextCursor.NextCharacter, QTextCursor.KeepAnchor)
 
         fmt = QTextCharFormat()
-        fmt.setBackground(QColor(255, 255, 255))
-        fmt.setForeground(QColor(0, 0, 0))
+        fmt.setBackground(self._cursor_bg)
+        fmt.setForeground(self._cursor_fg)
 
         selection = QTextEdit.ExtraSelection()
         selection.cursor = block_cursor
