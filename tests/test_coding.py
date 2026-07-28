@@ -75,6 +75,19 @@ def test_apply_segment_creates_segment_and_highlight(qtbot, tmp_path):
     assert len(window.viewer._code_highlights) == 1
 
 
+def test_applying_same_code_to_same_span_twice_is_not_duplicated(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    _open_project_with_document(window, tmp_path)
+
+    code = window.add_code("Frustration")
+    window.apply_segment(code.id, 6, 16)  # "frustrating"
+    window.apply_segment(code.id, 6, 16)  # re-applying the same code/span
+
+    segments = db.list_segments_for_document(window.conn, window._current_document_id)
+    assert len(segments) == 1
+
+
 def test_switching_documents_refreshes_highlights(qtbot, tmp_path):
     window = MainWindow()
     qtbot.addWidget(window)

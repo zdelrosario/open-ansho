@@ -229,6 +229,16 @@ def create_segment(
 ) -> Segment:
     if end_offset <= start_offset:
         raise ValueError("end_offset must be greater than start_offset")
+    existing = conn.execute(
+        """
+        SELECT * FROM segments
+        WHERE document_id = ? AND code_id = ? AND start_offset = ? AND end_offset = ?
+            AND created_by IS ?
+        """,
+        (document_id, code_id, start_offset, end_offset, created_by),
+    ).fetchone()
+    if existing is not None:
+        return Segment(**existing)
     cur = conn.execute(
         """
         INSERT INTO segments

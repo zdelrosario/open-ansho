@@ -140,6 +140,38 @@ def test_create_segment_rejects_invalid_offsets(conn):
         db.create_segment(conn, doc.id, code.id, 5, 5)
 
 
+def test_create_segment_is_idempotent_for_identical_span(conn):
+    doc = db.create_document(conn, "interview_01.txt", "Hello world.")
+    code = db.create_code(conn, "Greeting")
+
+    first = db.create_segment(conn, doc.id, code.id, 0, 5, created_by="alice")
+    second = db.create_segment(conn, doc.id, code.id, 0, 5, created_by="alice")
+
+    assert first.id == second.id
+    assert len(db.list_segments_for_document(conn, doc.id)) == 1
+
+
+def test_create_segment_allows_different_code_on_same_span(conn):
+    doc = db.create_document(conn, "interview_01.txt", "Hello world.")
+    code_a = db.create_code(conn, "Greeting")
+    code_b = db.create_code(conn, "Other")
+
+    db.create_segment(conn, doc.id, code_a.id, 0, 5, created_by="alice")
+    db.create_segment(conn, doc.id, code_b.id, 0, 5, created_by="alice")
+
+    assert len(db.list_segments_for_document(conn, doc.id)) == 2
+
+
+def test_create_segment_allows_same_code_on_same_span_by_different_users(conn):
+    doc = db.create_document(conn, "interview_01.txt", "Hello world.")
+    code = db.create_code(conn, "Greeting")
+
+    db.create_segment(conn, doc.id, code.id, 0, 5, created_by="alice")
+    db.create_segment(conn, doc.id, code.id, 0, 5, created_by="bob")
+
+    assert len(db.list_segments_for_document(conn, doc.id)) == 2
+
+
 def test_list_segments_for_document_ordered_by_offset(conn):
     doc = db.create_document(conn, "interview_01.txt", "Hello world, it's me.")
     code = db.create_code(conn, "Greeting")
