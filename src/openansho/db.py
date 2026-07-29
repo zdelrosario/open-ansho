@@ -228,6 +228,34 @@ def delete_code(conn: sqlite3.Connection, code_id: int) -> None:
     conn.commit()
 
 
+def merge_codes(conn: sqlite3.Connection, keep_id: int, merge_id: int) -> None:
+    """Merge `merge_id` into `keep_id`.
+
+    Segments coded with `merge_id` are re-coded to `keep_id`, dropping any
+    that would exactly duplicate a segment `keep_id` already has. Children of
+    `merge_id` are re-parented to `keep_id` before it's deleted, the same
+    cascade-dodging move `delete_code` makes for its own children.
+    """
+    keep_segments = {
+        (s.document_id, s.start_offset, s.end_offset, s.created_by)
+        for s in list_segments_for_code(conn, keep_id)
+    }
+    for segment in list_segments_for_code(conn, merge_id):
+        key = (segment.document_id, segment.start_offset, segment.end_offset, segment.created_by)
+        if key in keep_segments:
+            conn.execute("DELETE FROM segments WHERE id = ?", (segment.id,))
+        else:
+            conn.execute(
+                "UPDATE segments SET code_id = ? WHERE id = ?", (keep_id, segment.id)
+            )
+            keep_segments.add(key)
+    conn.execute(
+        "UPDATE codes SET parent_id = ? WHERE parent_id = ?", (keep_id, merge_id)
+    )
+    conn.execute("DELETE FROM codes WHERE id = ?", (merge_id,))
+    conn.commit()
+
+
 def create_segment(
     conn: sqlite3.Connection,
     document_id: int,

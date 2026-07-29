@@ -167,6 +167,80 @@ def test_delete_code_removes_its_highlight_from_the_viewer(qtbot, tmp_path):
     assert len(window.viewer.extraSelections()) == 1  # just the block cursor
 
 
+def test_merge_codes_recodes_segments_and_removes_merged_code(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    _open_project_with_document(window, tmp_path, "Hello frustrating world.")
+
+    keep = window.add_code("Anger")
+    merge = window.add_code("Frustration")
+    window.apply_segment(merge.id, 6, 17)  # "frustrating"
+
+    window.merge_codes(keep.id, merge.id)
+
+    assert db.get_code(window.conn, merge.id) is None
+    assert window.code_tree.topLevelItemCount() == 1
+    assert window.code_tree.topLevelItem(0).data(0, Qt.UserRole) == keep.id
+    segments = db.list_segments_for_code(window.conn, keep.id)
+    assert len(segments) == 1
+
+
+def test_merge_codes_reparents_children_to_kept_code(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.create_project(tmp_path / "project.sqlite")
+
+    keep = window.add_code("Anger")
+    merge = window.add_code("Frustration")
+    child = window.add_code("Mild Frustration", parent_id=merge.id)
+
+    window.merge_codes(keep.id, merge.id)
+
+    keep_item = window.code_tree.topLevelItem(0)
+    assert keep_item.data(0, Qt.UserRole) == keep.id
+    assert keep_item.childCount() == 1
+    assert keep_item.child(0).data(0, Qt.UserRole) == child.id
+
+
+def test_merge_codes_rejects_merging_a_code_into_itself(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.create_project(tmp_path / "project.sqlite")
+
+    code = window.add_code("Anger")
+
+    with pytest.raises(ValueError):
+        window.merge_codes(code.id, code.id)
+
+
+def test_merge_codes_rejects_keeping_a_descendant_of_the_merged_code(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.create_project(tmp_path / "project.sqlite")
+
+    merge = window.add_code("Emotions")
+    keep = window.add_code("Frustration", parent_id=merge.id)
+
+    with pytest.raises(ValueError):
+        window.merge_codes(keep.id, merge.id)
+
+
+def test_code_has_other_user_segments_ignores_own_and_blank_creators(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    _open_project_with_document(window, tmp_path, "Hello frustrating world.")
+    window.username = "alice"
+
+    code = window.add_code("Frustration")
+    assert window._code_has_other_user_segments(code.id) is False
+
+    db.create_segment(window.conn, window._current_document_id, code.id, 0, 5, created_by="alice")
+    assert window._code_has_other_user_segments(code.id) is False
+
+    db.create_segment(window.conn, window._current_document_id, code.id, 6, 17, created_by="bob")
+    assert window._code_has_other_user_segments(code.id) is True
+
+
 def test_segment_list_populates_for_selected_code(qtbot, tmp_path):
     window = MainWindow()
     qtbot.addWidget(window)

@@ -121,6 +121,41 @@ def test_delete_code_leaves_siblings_and_other_codes_alone(conn):
     assert db.get_code(conn, other.id) is not None
 
 
+def test_merge_codes_recodes_segments_to_kept_code(conn):
+    doc = db.create_document(conn, "doc.txt", "Hello world.")
+    keep = db.create_code(conn, "Anger")
+    merge = db.create_code(conn, "Frustration")
+    segment = db.create_segment(conn, doc.id, merge.id, 0, 5)
+
+    db.merge_codes(conn, keep.id, merge.id)
+
+    assert db.get_code(conn, merge.id) is None
+    assert db.get_segment(conn, segment.id).code_id == keep.id
+
+
+def test_merge_codes_reparents_children_to_kept_code(conn):
+    keep = db.create_code(conn, "Anger")
+    merge = db.create_code(conn, "Frustration")
+    child = db.create_code(conn, "Mild Frustration", parent_id=merge.id)
+
+    db.merge_codes(conn, keep.id, merge.id)
+
+    assert db.get_code(conn, child.id).parent_id == keep.id
+
+
+def test_merge_codes_drops_duplicate_segments(conn):
+    doc = db.create_document(conn, "doc.txt", "Hello world.")
+    keep = db.create_code(conn, "Anger")
+    merge = db.create_code(conn, "Frustration")
+    db.create_segment(conn, doc.id, keep.id, 0, 5, created_by="alice")
+    duplicate = db.create_segment(conn, doc.id, merge.id, 0, 5, created_by="alice")
+
+    db.merge_codes(conn, keep.id, merge.id)
+
+    assert db.get_segment(conn, duplicate.id) is None
+    assert len(db.list_segments_for_code(conn, keep.id)) == 1
+
+
 def test_create_segment_links_document_and_code(conn):
     doc = db.create_document(conn, "interview_01.txt", "Hello world.")
     code = db.create_code(conn, "Greeting")

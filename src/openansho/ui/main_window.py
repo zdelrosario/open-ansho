@@ -10,6 +10,7 @@ from PySide6.QtGui import QAction, QColor, QFont, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
+    QDialog,
     QFileDialog,
     QHBoxLayout,
     QHeaderView,
@@ -34,6 +35,7 @@ from openansho.db import Code
 from openansho.ui.checkable_combo_box import CheckableComboBox
 from openansho.ui.code_filter_input import CodeFilterLineEdit
 from openansho.ui.code_tree import CodeTreeWidget
+from openansho.ui.merge_codes_dialog import MergeCodesDialog
 from openansho.ui.os_theme import detect_dark_mode
 from openansho.ui.preferences_dialog import PreferencesDialog
 from openansho.ui.report_dialog import CodeFrequencyDialog, CodeUserFrequencyDialog
@@ -769,6 +771,7 @@ class MainWindow(QMainWindow):
             color_menu.addAction(action)
             color_actions[action] = color_class
 
+        merge_action = menu.addAction("Merge Codes…")
         delete_action = menu.addAction("Delete…")
 
         chosen = menu.exec(self.code_tree.viewport().mapToGlobal(pos))
@@ -782,6 +785,8 @@ class MainWindow(QMainWindow):
             self._on_edit_code_description(code_id, code.description if code else None)
         elif chosen in color_actions:
             self.set_code_base_color(code_id, color_actions[chosen])
+        elif chosen is merge_action:
+            self._on_merge_codes(code_id)
         elif chosen is delete_action:
             self._on_delete_code(code_id, item.text(0))
 
@@ -817,6 +822,53 @@ class MainWindow(QMainWindow):
         if reply != QMessageBox.Yes:
             return
         self.delete_code(code_id)
+
+    def _on_merge_codes(self, code_id: int) -> None:
+        if self.conn is None:
+            return
+        codes_by_id = {code.id: code for code in db.list_codes(self.conn)}
+        if len(codes_by_id) < 2:
+            QMessageBox.information(
+                self, "Merge Codes", "There must be at least two codes to merge."
+            )
+            return
+        options = sorted(
+            ((cid, reporting.code_path(codes_by_id, cid)) for cid in codes_by_id),
+            key=lambda pair: pair[1],
+        )
+        dialog = MergeCodesDialog(options, default_merge_id=code_id, parent=self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        keep_id, merge_id = dialog.keep_id(), dialog.merge_id()
+
+        other_user_codes = [
+            codes_by_id[cid].name
+            for cid in (keep_id, merge_id)
+            if self._code_has_other_user_segments(cid)
+        ]
+        if other_user_codes:
+            reply = QMessageBox.warning(
+                self,
+                "Merge Codes",
+                "The following code(s) have segments coded by a user other "
+                f"than the active user: {', '.join(other_user_codes)}.\n\n"
+                "Merge anyway?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if reply != QMessageBox.Yes:
+                return
+
+        try:
+            self.merge_codes(keep_id, merge_id)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Merge Codes", str(exc))
+
+    def _code_has_other_user_segments(self, code_id: int) -> bool:
+        return any(
+            segment.created_by and segment.created_by != self.username
+            for segment in db.list_segments_for_code(self.conn, code_id)
+        )
 
     def _on_segment_activated(self, item: QListWidgetItem) -> None:
         data = item.data(Qt.UserRole)
@@ -1105,6 +1157,23 @@ class MainWindow(QMainWindow):
             self._last_selected_code_id = None
         self._refresh_codes()
         self._refresh_highlights()
+
+    def merge_codes(self, keep_id: int, merge_id: int) -> None:
+        if self.conn is None:
+            raise RuntimeError("No project open")
+        if keep_id == merge_id:
+            raise ValueError("Cannot merge a code into itself.")
+        if self._is_descendant_of(keep_id, merge_id):
+            raise ValueError(
+                "Cannot keep a code that is nested under the code being merged away."
+            )
+        db.merge_codes(self.conn, keep_id, merge_id)
+        if self._last_selected_code_id == merge_id:
+            self._last_selected_code_id = None
+        self._refresh_user_filter()
+        self._refresh_codes()
+        self._refresh_highlights()
+        self._render_segments_panel()
 
     def _is_descendant_of(self, candidate_id: int, ancestor_id: int) -> bool:
         if self.conn is None:
