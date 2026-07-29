@@ -64,6 +64,14 @@ BASE_COLOR_CLASSES = [
     "#A65BC0",
 ]
 
+# A neutral grey, assignable manually but excluded from BASE_COLOR_CLASSES so
+# automatic/random assignment never picks it.
+GREY_COLOR_CLASS = "#757575"
+
+# Every color class a user can pick from the "Assign Base Color" menu,
+# including grey. Automatic assignment must use BASE_COLOR_CLASSES instead.
+ASSIGNABLE_COLOR_CLASSES = BASE_COLOR_CLASSES + [GREY_COLOR_CLASS]
+
 BASE_COLOR_CLASS_NAMES = {
     "#D81B60": "Red",
     "#1E88E5": "Blue",
@@ -71,6 +79,7 @@ BASE_COLOR_CLASS_NAMES = {
     "#004D40": "Green",
     "#DE6E1C": "Orange",
     "#A65BC0": "Purple",
+    GREY_COLOR_CLASS: "Grey",
 }
 
 # Fraction of the way to blend a child's color toward white, relative to its
@@ -710,7 +719,7 @@ class MainWindow(QMainWindow):
         color_menu = menu.addMenu("Assign Base Color")
         color_menu.setEnabled(code is not None and code.parent_id is None)
         color_actions = {}
-        for color_class in BASE_COLOR_CLASSES:
+        for color_class in ASSIGNABLE_COLOR_CLASSES:
             label = BASE_COLOR_CLASS_NAMES.get(color_class, color_class)
             is_current = code is not None and code.color_class == color_class
             action = QWidgetAction(color_menu)
@@ -1029,7 +1038,7 @@ class MainWindow(QMainWindow):
     def set_code_base_color(self, code_id: int, color_class: str) -> Code:
         if self.conn is None:
             raise RuntimeError("No project open")
-        if color_class not in BASE_COLOR_CLASSES:
+        if color_class not in ASSIGNABLE_COLOR_CLASSES:
             raise ValueError(f"Unknown base color class: {color_class}")
         target = db.get_code(self.conn, code_id)
         if target is None:
