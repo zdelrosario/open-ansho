@@ -530,6 +530,99 @@ def test_f_with_no_match_does_not_move_cursor(qtbot):
     assert not viewer.textCursor().hasSelection()
 
 
+def test_i_enters_insert_mode(qtbot):
+    viewer = _make_viewer(qtbot)
+    viewer.setFocus()
+
+    QTest.keyClick(viewer, Qt.Key_I)
+
+    assert viewer.mode == VimTextViewer.INSERT
+    assert not viewer.isReadOnly()
+
+
+def test_escape_in_insert_mode_returns_to_normal_mode(qtbot):
+    viewer = _make_viewer(qtbot)
+    viewer.setFocus()
+    QTest.keyClick(viewer, Qt.Key_I)
+
+    QTest.keyClick(viewer, Qt.Key_Escape)
+
+    assert viewer.mode == VimTextViewer.NORMAL
+    assert viewer.isReadOnly()
+
+
+def test_i_in_visual_mode_does_not_enter_insert_mode(qtbot):
+    viewer = _make_viewer(qtbot)
+    viewer.setFocus()
+    QTest.keyClick(viewer, Qt.Key_V)
+
+    QTest.keyClick(viewer, Qt.Key_I)
+
+    assert viewer.mode == VimTextViewer.VISUAL
+
+
+def test_insert_mode_hides_the_block_cursor_highlight(qtbot):
+    viewer = _make_viewer(qtbot)
+    viewer.setFocus()
+
+    QTest.keyClick(viewer, Qt.Key_I)
+
+    assert viewer.extraSelections() == []
+
+
+def test_typing_in_insert_mode_edits_the_document_and_emits_content_edited(qtbot):
+    viewer = _make_viewer(qtbot, "Hello world.")
+    viewer.setFocus()
+    QTest.keyClick(viewer, Qt.Key_I)
+
+    edits = []
+    viewer.contentEdited.connect(lambda pos, removed, added: edits.append((pos, removed, added)))
+
+    QTest.keyClicks(viewer, "X")
+
+    assert viewer.toPlainText() == "XHello world."
+    assert edits == [(0, 0, 1)]
+
+
+def test_backspace_in_insert_mode_emits_content_edited_with_removal(qtbot):
+    viewer = _make_viewer(qtbot, "Hello world.")
+    viewer.setFocus()
+    cursor = viewer.textCursor()
+    cursor.setPosition(5)
+    viewer.setTextCursor(cursor)
+    QTest.keyClick(viewer, Qt.Key_I)
+
+    edits = []
+    viewer.contentEdited.connect(lambda pos, removed, added: edits.append((pos, removed, added)))
+
+    QTest.keyClick(viewer, Qt.Key_Backspace)
+
+    assert viewer.toPlainText() == "Hell world."
+    assert edits == [(4, 1, 0)]
+
+
+def test_set_plain_text_does_not_emit_content_edited(qtbot):
+    viewer = _make_viewer(qtbot, "Hello world.")
+
+    edits = []
+    viewer.contentEdited.connect(lambda pos, removed, added: edits.append((pos, removed, added)))
+
+    viewer.setPlainText("Different text.")
+
+    assert edits == []
+
+
+def test_clear_does_not_emit_content_edited(qtbot):
+    viewer = _make_viewer(qtbot, "Hello world.")
+
+    edits = []
+    viewer.contentEdited.connect(lambda pos, removed, added: edits.append((pos, removed, added)))
+
+    viewer.clear()
+
+    assert edits == []
+
+
 def test_visual_mode_f_extends_selection(qtbot):
     viewer = _make_viewer(qtbot, "Hello frustrating world.")
     viewer.setFocus()

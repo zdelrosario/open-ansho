@@ -137,6 +137,16 @@ def delete_document(conn: sqlite3.Connection, document_id: int) -> None:
     conn.commit()
 
 
+def update_document_content(
+    conn: sqlite3.Connection, document_id: int, content: str
+) -> Document:
+    conn.execute(
+        "UPDATE documents SET content = ? WHERE id = ?", (content, document_id)
+    )
+    conn.commit()
+    return get_document(conn, document_id)
+
+
 def create_code(
     conn: sqlite3.Connection,
     name: str,
@@ -312,3 +322,14 @@ def count_segments_by_code(
 def delete_segment(conn: sqlite3.Connection, segment_id: int) -> None:
     conn.execute("DELETE FROM segments WHERE id = ?", (segment_id,))
     conn.commit()
+
+
+def update_segment_offsets(
+    conn: sqlite3.Connection, segment_id: int, start_offset: int, end_offset: int
+) -> Segment:
+    conn.execute(
+        "UPDATE segments SET start_offset = ?, end_offset = ? WHERE id = ?",
+        (start_offset, end_offset, segment_id),
+    )
+    conn.commit()
+    return get_segment(conn, segment_id)

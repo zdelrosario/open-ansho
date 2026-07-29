@@ -212,6 +212,26 @@ def test_delete_segment(conn):
     assert db.list_segments_for_document(conn, doc.id) == []
 
 
+def test_update_segment_offsets(conn):
+    doc = db.create_document(conn, "interview_01.txt", "Hello world.")
+    code = db.create_code(conn, "Greeting")
+    segment = db.create_segment(conn, doc.id, code.id, 0, 5)
+
+    updated = db.update_segment_offsets(conn, segment.id, 6, 11)
+
+    assert (updated.start_offset, updated.end_offset) == (6, 11)
+    assert (db.get_segment(conn, segment.id).start_offset, db.get_segment(conn, segment.id).end_offset) == (6, 11)
+
+
+def test_update_document_content(conn):
+    doc = db.create_document(conn, "interview_01.txt", "Hello world.")
+
+    updated = db.update_document_content(conn, doc.id, "Goodbye world.")
+
+    assert updated.content == "Goodbye world."
+    assert db.get_document(conn, doc.id).content == "Goodbye world."
+
+
 def test_count_segments_by_code_across_all_documents(conn):
     doc_a = db.create_document(conn, "a.txt", "Hello world.")
     doc_b = db.create_document(conn, "b.txt", "Hello again.")

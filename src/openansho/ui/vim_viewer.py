@@ -63,14 +63,26 @@ class VimTextViewer(QPlainTextEdit):
     repeats the search forward from the cursor and Shift+N repeats it
     backward; both switch to visual mode with the whole match selected,
     ready to code it with Enter.
+
+    Pressing i from normal mode enters insert mode, which re-enables
+    ordinary text editing (the widget is otherwise read-only) and swaps
+    the hand-rolled block cursor for a normal blinking I-beam one. Escape
+    returns to normal mode. Every edit made while in insert mode is
+    reported via `contentEdited` (position, charsRemoved, charsAdded) so
+    a listener can shift or truncate coded segments' offsets to match;
+    programmatic content changes (`setPlainText`/`clear`, used when
+    loading a different document) are not reported, since those aren't
+    edits to reconcile offsets against.
     """
 
     NORMAL = "normal"
     VISUAL = "visual"
     SEARCH = "search"
+    INSERT = "insert"
 
     modeChanged = Signal(str)
     searchTextChanged = Signal(str)
+    contentEdited = Signal(int, int, int)  # position, charsRemoved, charsAdded
 
     # Keyed by key code (not text) so Shift-based case doesn't matter here;
     # shifted letters (W/B/E, G) are disambiguated via the Shift modifier.
@@ -100,11 +112,37 @@ class VimTextViewer(QPlainTextEdit):
         self._search_pattern = ""
         self._search_buffer = ""
         self._search_origin = 0
+        self._suspend_edit_tracking = False
 
         self.set_theme(dark_mode=False)
 
         self.cursorPositionChanged.connect(self._refresh_extra_selections)
+        self.document().contentsChange.connect(self._on_contents_change)
         self._refresh_extra_selections()
+
+    def setPlainText(self, text: str) -> None:
+        """Load `text` without reporting it through `contentEdited`.
+
+        Used to load a different document's content, which isn't an edit
+        that existing segment offsets need to be reconciled against.
+        """
+        self._suspend_edit_tracking = True
+        try:
+            super().setPlainText(text)
+        finally:
+            self._suspend_edit_tracking = False
+
+    def clear(self) -> None:
+        self._suspend_edit_tracking = True
+        try:
+            super().clear()
+        finally:
+            self._suspend_edit_tracking = False
+
+    def _on_contents_change(self, position: int, chars_removed: int, chars_added: int) -> None:
+        if self._suspend_edit_tracking:
+            return
+        self.contentEdited.emit(position, chars_removed, chars_added)
 
     def set_theme(self, dark_mode: bool) -> None:
         """Set the block cursor colors for the given theme.
@@ -147,9 +185,37 @@ class VimTextViewer(QPlainTextEdit):
         self.setTextCursor(cursor)
         self.modeChanged.emit(self.mode)
 
+    def enter_insert_mode(self) -> None:
+        if self.mode == self.INSERT:
+            return
+        if self.mode == self.SEARCH:
+            self._cancel_search()
+        self.mode = self.INSERT
+        self.setReadOnly(False)
+        self.setCursorWidth(1)  # ordinary blinking I-beam, not the vim block cursor
+        self._refresh_extra_selections()
+        self.modeChanged.emit(self.mode)
+
+    def exit_insert_mode(self) -> None:
+        if self.mode != self.INSERT:
+            return
+        self.mode = self.NORMAL
+        self.setReadOnly(True)
+        self.setCursorWidth(0)  # back to rendering our own block cursor
+        self._refresh_extra_selections()
+        self.modeChanged.emit(self.mode)
+
     def keyPressEvent(self, event) -> None:
         if self.mode == self.SEARCH:
             self._handle_search_key(event)
+            return
+
+        if self.mode == self.INSERT:
+            if event.key() == Qt.Key_Escape:
+                self.exit_insert_mode()
+                event.accept()
+                return
+            super().keyPressEvent(event)
             return
 
         key = event.key()
@@ -181,6 +247,14 @@ class VimTextViewer(QPlainTextEdit):
             self._pending_g = False
             self._pending_z = False
             self._toggle_visual_mode()
+            event.accept()
+            return
+
+        if key == Qt.Key_I:
+            if self.mode == self.NORMAL:
+                self._pending_g = False
+                self._pending_z = False
+                self.enter_insert_mode()
             event.accept()
             return
 
@@ -665,6 +739,10 @@ class VimTextViewer(QPlainTextEdit):
         return rects
 
     def _refresh_extra_selections(self) -> None:
+        if self.mode == self.INSERT:
+            # A normal blinking cursor is visible instead; no block to highlight.
+            super().setExtraSelections([])
+            return
         super().setExtraSelections([self._cursor_highlight_selection()])
 
     def _cursor_highlight_selection(self) -> QTextEdit.ExtraSelection:

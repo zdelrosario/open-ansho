@@ -33,10 +33,18 @@ SHORTCUT_SECTIONS = [
             ("zz", "Center the viewport on the current cursor line"),
             ("f<char> / F<char>", "Jump forward / backward to next occurrence of char in document"),
             ("v", "Toggle visual (selection) mode"),
+            ("i", "Enter insert (text editing) mode"),
             ("/", "Enter search mode (regex, smartcase)"),
             ("n / N", "Repeat last search forward / backward"),
             ("?", "Show this shortcuts popup"),
-            ("Esc", "Exit visual/search mode, or close this popup"),
+            ("Esc", "Exit visual/search/insert mode, or close this popup"),
+        ],
+    ),
+    (
+        "Insert mode",
+        [
+            ("Esc", "Return to normal mode"),
+            ("(button)", "The Insert Mode button below the text pane also toggles it"),
         ],
     ),
     (

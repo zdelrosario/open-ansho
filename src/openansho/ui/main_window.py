@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
     QFileDialog,
+    QHBoxLayout,
     QHeaderView,
     QInputDialog,
     QLabel,
@@ -239,6 +240,7 @@ class MainWindow(QMainWindow):
         self.viewer.cursorPositionChanged.connect(self._on_viewer_cursor_moved)
         self.viewer.modeChanged.connect(self._on_viewer_mode_changed)
         self.viewer.searchTextChanged.connect(self._on_viewer_search_text_changed)
+        self.viewer.contentEdited.connect(self._on_viewer_content_edited)
 
         self.code_tree = CodeTreeWidget()
         self.code_tree.setHeaderHidden(True)
@@ -321,11 +323,20 @@ class MainWindow(QMainWindow):
         self.username_label.setAlignment(Qt.AlignCenter)
         self._update_username_label()
 
+        self.insert_mode_button = QPushButton("Insert Mode")
+        self.insert_mode_button.setCheckable(True)
+        self.insert_mode_button.toggled.connect(self._on_insert_mode_button_toggled)
+
+        viewer_bottom_bar = QHBoxLayout()
+        viewer_bottom_bar.addStretch()
+        viewer_bottom_bar.addWidget(self.insert_mode_button)
+
         viewer_container = QWidget()
         viewer_layout = QVBoxLayout(viewer_container)
         viewer_layout.setContentsMargins(0, 0, 0, 0)
         viewer_layout.addWidget(self.viewer)
         viewer_layout.addWidget(self.username_label)
+        viewer_layout.addLayout(viewer_bottom_bar)
 
         splitter = QSplitter()
         splitter.addWidget(self.document_list)
@@ -371,6 +382,13 @@ class MainWindow(QMainWindow):
             # key it happens to be (including keys like x/c/Enter that would
             # otherwise be hijacked as coding shortcuts).
             if QApplication.focusWidget() is self.viewer and self.viewer.awaiting_find_char:
+                return super().eventFilter(watched, event)
+
+            # In insert mode the viewer is an ordinary text editor; every key
+            # (including ones global shortcuts would otherwise hijack, like
+            # Space/Enter/x/c/?) must reach VimTextViewer's own key handling
+            # so typing/editing works normally.
+            if QApplication.focusWidget() is self.viewer and self.viewer.mode == VimTextViewer.INSERT:
                 return super().eventFilter(watched, event)
 
             # While the viewer is composing a search string, key presses that would
@@ -603,6 +621,7 @@ class MainWindow(QMainWindow):
         self, current: QListWidgetItem | None, _previous: QListWidgetItem | None
     ) -> None:
         self.viewer.exit_visual_mode()
+        self.viewer.exit_insert_mode()
         if current is None or self.conn is None:
             self._current_document_id = None
             self.viewer.clear()
@@ -623,8 +642,20 @@ class MainWindow(QMainWindow):
             self.vim_mode_label.setText("-- VISUAL --")
         elif mode == VimTextViewer.SEARCH:
             self.vim_mode_label.setText("-- SEARCH --")
+        elif mode == VimTextViewer.INSERT:
+            self.vim_mode_label.setText("-- INSERT --")
         else:
             self.vim_mode_label.setText("")
+        self.insert_mode_button.blockSignals(True)
+        self.insert_mode_button.setChecked(mode == VimTextViewer.INSERT)
+        self.insert_mode_button.blockSignals(False)
+
+    def _on_insert_mode_button_toggled(self, checked: bool) -> None:
+        if checked:
+            self.viewer.enter_insert_mode()
+        else:
+            self.viewer.exit_insert_mode()
+        self.viewer.setFocus()
 
     def _on_viewer_search_text_changed(self, text: str) -> None:
         self.search_label.setText(f"/{text}" if text else "")
@@ -949,6 +980,7 @@ class MainWindow(QMainWindow):
         self._update_username_label()
         self._current_document_id = None
         self._last_selected_code_id = None
+        self.viewer.exit_insert_mode()
         self.viewer.clear()
         self.viewer.set_code_highlights([])
         self._refresh_documents()
@@ -1095,6 +1127,46 @@ class MainWindow(QMainWindow):
         self._refresh_codes()
         self._refresh_highlights()
         self._render_segments_panel()
+
+    def _on_viewer_content_edited(self, position: int, chars_removed: int, chars_added: int) -> None:
+        """Persist an insert-mode text edit and reconcile coded segments against it.
+
+        `position`/`chars_removed`/`chars_added` come straight from
+        `QTextDocument.contentsChange`: `chars_removed` characters at
+        `position` were replaced by `chars_added` new ones. Every segment
+        boundary in the document is remapped through the same edit so
+        existing codings keep pointing at the same underlying text.
+        """
+        if self.conn is None or self._current_document_id is None:
+            return
+        db.update_document_content(
+            self.conn, self._current_document_id, self.viewer.toPlainText()
+        )
+        self._adjust_segments_for_edit(position, chars_removed, chars_added)
+        self._refresh_codes()
+        self._refresh_highlights()
+        self._render_segments_panel()
+
+    def _adjust_segments_for_edit(
+        self, position: int, chars_removed: int, chars_added: int
+    ) -> None:
+        removed_end = position + chars_removed
+        delta = chars_added - chars_removed
+
+        def remap(offset: int) -> int:
+            if offset <= position:
+                return offset
+            if offset >= removed_end:
+                return offset + delta
+            return position  # offset fell inside the replaced span
+
+        for segment in db.list_segments_for_document(self.conn, self._current_document_id):
+            new_start = remap(segment.start_offset)
+            new_end = remap(segment.end_offset)
+            if new_end <= new_start:
+                db.delete_segment(self.conn, segment.id)
+            elif (new_start, new_end) != (segment.start_offset, segment.end_offset):
+                db.update_segment_offsets(self.conn, segment.id, new_start, new_end)
 
     def _apply_code_to_viewer_selection(self, code_id: int) -> bool:
         cursor = self.viewer.textCursor()

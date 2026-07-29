@@ -534,6 +534,203 @@ def test_f_target_char_space_does_not_shift_focus_to_code_filter(qtbot, tmp_path
     assert window.viewer.hasFocus()
 
 
+def test_i_enters_insert_mode_and_shows_label(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    _open_project_with_document(window, tmp_path)
+
+    window.viewer.setFocus()
+    qtbot.waitUntil(lambda: window.viewer.hasFocus())
+
+    QTest.keyClick(window.viewer, Qt.Key_I)
+
+    assert window.viewer.mode == VimTextViewer.INSERT
+    assert window.vim_mode_label.text() == "-- INSERT --"
+    assert window.insert_mode_button.isChecked()
+
+    QTest.keyClick(window.viewer, Qt.Key_Escape)
+
+    assert window.viewer.mode == VimTextViewer.NORMAL
+    assert window.vim_mode_label.text() == ""
+    assert not window.insert_mode_button.isChecked()
+
+
+def test_insert_mode_button_toggles_insert_mode(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    _open_project_with_document(window, tmp_path)
+
+    window.insert_mode_button.setChecked(True)
+    qtbot.waitUntil(lambda: window.viewer.hasFocus())
+    assert window.viewer.mode == VimTextViewer.INSERT
+
+    window.insert_mode_button.setChecked(False)
+    assert window.viewer.mode == VimTextViewer.NORMAL
+
+
+def test_typing_in_insert_mode_persists_document_content(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    _open_project_with_document(window, tmp_path, "Hello world.")
+
+    window.viewer.setFocus()
+    qtbot.waitUntil(lambda: window.viewer.hasFocus())
+    _place_cursor(window, 0)
+
+    QTest.keyClick(window.viewer, Qt.Key_I)
+    QTest.keyClicks(window.viewer, "Well, ")
+    QTest.keyClick(window.viewer, Qt.Key_Escape)
+
+    doc = db.get_document(window.conn, window._current_document_id)
+    assert doc.content == "Well, Hello world."
+
+
+def test_insert_before_segment_shifts_its_offsets(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    _open_project_with_document(window, tmp_path, "Hello frustrating world.")
+    code = window.add_code("Frustration")
+    window.apply_segment(code.id, 6, 17)  # "frustrating"
+
+    window.viewer.setFocus()
+    qtbot.waitUntil(lambda: window.viewer.hasFocus())
+    _place_cursor(window, 0)
+
+    QTest.keyClick(window.viewer, Qt.Key_I)
+    QTest.keyClicks(window.viewer, "Say: ")  # 5 chars inserted before the segment
+    QTest.keyClick(window.viewer, Qt.Key_Escape)
+
+    segments = db.list_segments_for_document(window.conn, window._current_document_id)
+    assert len(segments) == 1
+    assert (segments[0].start_offset, segments[0].end_offset) == (11, 22)
+
+
+def test_insert_inside_segment_extends_it(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    _open_project_with_document(window, tmp_path, "Hello frustrating world.")
+    code = window.add_code("Frustration")
+    window.apply_segment(code.id, 6, 17)  # "frustrating"
+
+    window.viewer.setFocus()
+    qtbot.waitUntil(lambda: window.viewer.hasFocus())
+    _place_cursor(window, 10)  # inside the coded span
+
+    QTest.keyClick(window.viewer, Qt.Key_I)
+    QTest.keyClicks(window.viewer, "XX")
+    QTest.keyClick(window.viewer, Qt.Key_Escape)
+
+    segments = db.list_segments_for_document(window.conn, window._current_document_id)
+    assert len(segments) == 1
+    assert (segments[0].start_offset, segments[0].end_offset) == (6, 19)
+
+
+def test_delete_before_segment_shifts_its_offsets_back(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    _open_project_with_document(window, tmp_path, "Hello frustrating world.")
+    code = window.add_code("Frustration")
+    window.apply_segment(code.id, 6, 17)  # "frustrating"
+
+    window.viewer.setFocus()
+    qtbot.waitUntil(lambda: window.viewer.hasFocus())
+    _place_cursor(window, 5)  # right after "Hello"
+
+    QTest.keyClick(window.viewer, Qt.Key_I)
+    for _ in range(5):
+        QTest.keyClick(window.viewer, Qt.Key_Backspace)  # deletes "Hello"
+    QTest.keyClick(window.viewer, Qt.Key_Escape)
+
+    assert window.viewer.toPlainText() == " frustrating world."
+    segments = db.list_segments_for_document(window.conn, window._current_document_id)
+    assert len(segments) == 1
+    assert (segments[0].start_offset, segments[0].end_offset) == (1, 12)
+
+
+def test_deleting_a_coded_span_removes_its_segment(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    _open_project_with_document(window, tmp_path, "Hello frustrating world.")
+    code = window.add_code("Frustration")
+    window.apply_segment(code.id, 6, 17)  # "frustrating"
+
+    window.viewer.setFocus()
+    qtbot.waitUntil(lambda: window.viewer.hasFocus())
+    _place_cursor(window, 17)  # right after "frustrating"
+
+    QTest.keyClick(window.viewer, Qt.Key_I)
+    for _ in range(11):
+        QTest.keyClick(window.viewer, Qt.Key_Backspace)  # deletes "frustrating"
+    QTest.keyClick(window.viewer, Qt.Key_Escape)
+
+    assert window.viewer.toPlainText() == "Hello  world."
+    assert db.list_segments_for_document(window.conn, window._current_document_id) == []
+
+
+def test_space_while_inserting_types_a_space_instead_of_shifting_focus(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    _open_project_with_document(window, tmp_path, "Helloworld.")
+
+    window.viewer.setFocus()
+    qtbot.waitUntil(lambda: window.viewer.hasFocus())
+    _place_cursor(window, 5)
+
+    QTest.keyClick(window.viewer, Qt.Key_I)
+    QTest.keyClick(window.viewer, Qt.Key_Space)
+
+    assert window.viewer.toPlainText() == "Hello world."
+    assert window.viewer.hasFocus()
+
+
+def test_enter_while_inserting_inserts_a_newline_instead_of_applying_a_code(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    _open_project_with_document(window, tmp_path, "Hello world.")
+    window.add_code("Greeting")
+
+    window.viewer.setFocus()
+    qtbot.waitUntil(lambda: window.viewer.hasFocus())
+    _place_cursor(window, 5)
+
+    QTest.keyClick(window.viewer, Qt.Key_I)
+    QTest.keyClick(window.viewer, Qt.Key_Return)
+
+    assert window.viewer.toPlainText() == "Hello\n world."
+    assert db.list_segments_for_document(window.conn, window._current_document_id) == []
+
+
+def test_switching_documents_exits_insert_mode(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    window.create_project(tmp_path / "project.sqlite")
+    (tmp_path / "a.txt").write_text("Content A here.", encoding="utf-8")
+    (tmp_path / "b.txt").write_text("Content B here.", encoding="utf-8")
+    window.import_document(tmp_path / "a.txt")
+    window.import_document(tmp_path / "b.txt")
+
+    window.document_list.setCurrentRow(0)
+    window.viewer.setFocus()
+    qtbot.waitUntil(lambda: window.viewer.hasFocus())
+    QTest.keyClick(window.viewer, Qt.Key_I)
+    assert window.viewer.mode == VimTextViewer.INSERT
+
+    window.document_list.setCurrentRow(1)
+
+    assert window.viewer.mode == VimTextViewer.NORMAL
+    assert window.viewer.isReadOnly()
+
+
 def test_f_target_char_return_does_not_apply_a_code(qtbot, tmp_path):
     window = MainWindow()
     qtbot.addWidget(window)
