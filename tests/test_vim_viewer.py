@@ -168,6 +168,23 @@ def test_gg_moves_to_document_start(qtbot):
     assert viewer.textCursor().position() == 0
 
 
+def test_zz_centers_viewport_without_moving_cursor(qtbot, monkeypatch):
+    viewer = _make_viewer(qtbot)
+    viewer.setFocus()
+    QTest.keyClick(viewer, Qt.Key_L)
+    position_before = viewer.textCursor().position()
+
+    calls = []
+    monkeypatch.setattr(viewer, "centerCursor", lambda: calls.append(True))
+
+    QTest.keyClick(viewer, Qt.Key_Z)
+    assert calls == []  # a single z does not center yet
+
+    QTest.keyClick(viewer, Qt.Key_Z)
+    assert calls == [True]
+    assert viewer.textCursor().position() == position_before
+
+
 def test_cursor_highlight_stays_visible_at_document_end(qtbot):
     viewer = _make_viewer(qtbot, "Hi")
     viewer.setFocus()

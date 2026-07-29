@@ -45,7 +45,8 @@ class VimTextViewer(QPlainTextEdit):
     G/gg jump to the bottom/top of the whole document. Shift+H/L/M are
     viewport-relative instead: H jumps to the start of the first line
     currently visible in the viewport, L to the start of the last one,
-    M to the start of the middle one.
+    M to the start of the middle one. zz scrolls the viewport so the
+    current cursor line is centered, without moving the cursor itself.
 
     f followed by any character jumps forward to the next occurrence of
     that character anywhere in the document (case-sensitive), crossing
@@ -93,6 +94,7 @@ class VimTextViewer(QPlainTextEdit):
 
         self.mode = self.NORMAL
         self._pending_g = False
+        self._pending_z = False
         self._pending_find: int | None = None
         self._code_highlights: list[CodeHighlight] = []
         self._search_pattern = ""
@@ -170,17 +172,20 @@ class VimTextViewer(QPlainTextEdit):
 
         if key == Qt.Key_Escape:
             self._pending_g = False
+            self._pending_z = False
             self.exit_visual_mode()
             event.accept()
             return
 
         if key == Qt.Key_V:
             self._pending_g = False
+            self._pending_z = False
             self._toggle_visual_mode()
             event.accept()
             return
 
         if key == Qt.Key_G:
+            self._pending_z = False
             if shift:
                 self._pending_g = False
                 self._move(QTextCursor.End)
@@ -192,7 +197,18 @@ class VimTextViewer(QPlainTextEdit):
             event.accept()
             return
 
+        if key == Qt.Key_Z and not shift:
+            self._pending_g = False
+            if self._pending_z:
+                self._pending_z = False
+                self.centerCursor()
+            else:
+                self._pending_z = True
+            event.accept()
+            return
+
         self._pending_g = False
+        self._pending_z = False
 
         if key == Qt.Key_H:
             if shift:
