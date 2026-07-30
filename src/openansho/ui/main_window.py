@@ -8,6 +8,7 @@ from pathlib import Path
 from PySide6.QtCore import QEvent, QSettings, Qt
 from PySide6.QtGui import QAction, QColor, QFont, QTextCursor
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
     QComboBox,
     QDialog,
@@ -251,7 +252,12 @@ class MainWindow(QMainWindow):
         self.code_tree.header().setSectionResizeMode(0, QHeaderView.Stretch)
         self.code_tree.header().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self.code_tree.setObjectName("codeTreePane")
+        # Renaming goes through the context menu's dialog (_on_rename_code), so the
+        # default double-click-to-edit-label trigger is disabled here to free up
+        # double-click for applying the code to the viewer's selection instead.
+        self.code_tree.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.code_tree.currentItemChanged.connect(self._on_code_selected)
+        self.code_tree.itemDoubleClicked.connect(self._on_code_double_clicked)
         self.code_tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.code_tree.customContextMenuRequested.connect(self._on_code_context_menu)
         self.code_tree.codeReparented.connect(self._on_code_reparented)
@@ -668,6 +674,12 @@ class MainWindow(QMainWindow):
         if current is not None:
             self._last_selected_code_id = current.data(0, Qt.UserRole)
         self._show_segments_for_code(current.data(0, Qt.UserRole) if current is not None else None)
+
+    def _on_code_double_clicked(self, item: QTreeWidgetItem, _column: int) -> None:
+        # Deliberately leaves the viewer's selection and focus untouched (unlike
+        # the code-filter's Enter-to-apply, which collapses the selection) so
+        # double-clicking further codes keeps applying them to the same span.
+        self._apply_code_to_viewer_selection(item.data(0, Qt.UserRole))
 
     def _on_code_sort_changed(self, index: int) -> None:
         self._code_sort_mode = self.code_sort_combo.itemData(index)

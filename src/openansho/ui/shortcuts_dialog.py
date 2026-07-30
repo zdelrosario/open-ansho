@@ -54,6 +54,12 @@ SHORTCUT_SECTIONS = [
             ("Enter", "Apply the matched code, or create a new code"),
         ],
     ),
+    (
+        "Codebook",
+        [
+            ("Double-click a code", "Apply it to the text pane's current selection"),
+        ],
+    ),
 ]
 
 

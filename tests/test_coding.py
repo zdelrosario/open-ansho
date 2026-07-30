@@ -1,5 +1,6 @@
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QTextCursor
+from PySide6.QtWidgets import QAbstractItemView
 
 from openansho import db
 from openansho.ui.main_window import BASE_COLOR_CLASSES
@@ -181,6 +182,59 @@ def test_remove_code_from_selection_only_deletes_that_codes_segment(qtbot, tmp_p
     segments = db.list_segments_for_document(window.conn, window._current_document_id)
     assert len(segments) == 1
     assert segments[0].code_id == outer.id
+
+
+def test_double_clicking_a_code_applies_it_and_preserves_the_selection(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    _open_project_with_document(window, tmp_path)
+
+    code = window.add_code("Frustration")
+
+    cursor = window.viewer.textCursor()
+    cursor.setPosition(6)
+    cursor.setPosition(16, QTextCursor.KeepAnchor)  # "frustrating"
+    window.viewer.setTextCursor(cursor)
+
+    item = window._code_items_by_id[code.id]
+    window.code_tree.itemDoubleClicked.emit(item, 0)
+
+    segments = db.list_segments_for_document(window.conn, window._current_document_id)
+    assert len(segments) == 1
+    assert (segments[0].start_offset, segments[0].end_offset) == (6, 16)
+
+    # Unlike Enter-to-apply in the code filter, double-clicking a code must not
+    # collapse the viewer's selection, so further codes can be applied to the
+    # same span without re-selecting the text.
+    assert window.viewer.textCursor().hasSelection()
+    assert (window.viewer.textCursor().selectionStart(), window.viewer.textCursor().selectionEnd()) == (
+        6,
+        16,
+    )
+
+
+def test_double_clicking_a_code_without_a_selection_is_a_noop(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    _open_project_with_document(window, tmp_path)
+
+    code = window.add_code("Frustration")
+    window.viewer.textCursor().clearSelection()
+
+    item = window._code_items_by_id[code.id]
+    window.code_tree.itemDoubleClicked.emit(item, 0)
+
+    assert db.list_segments_for_document(window.conn, window._current_document_id) == []
+
+
+def test_code_tree_disables_double_click_to_edit_label(qtbot, tmp_path):
+    # Renaming a code is dialog-driven (context menu -> _on_rename_code); the
+    # default double-click-to-edit-label trigger would otherwise fight with
+    # double-click-to-apply for the same gesture.
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    assert window.code_tree.editTriggers() == QAbstractItemView.NoEditTriggers
 
 
 def test_apply_code_button_noop_without_selection(qtbot, tmp_path, monkeypatch):
