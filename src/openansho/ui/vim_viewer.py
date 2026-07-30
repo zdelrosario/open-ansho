@@ -3,9 +3,11 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from PySide6.QtCore import QRect, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPen, QTextCharFormat, QTextCursor
+from PySide6.QtCore import QPointF, QRect, QRectF, Qt, Signal
+from PySide6.QtGui import QColor, QPainter, QPen, QPolygonF, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import QPlainTextEdit, QTextEdit
+
+STRIPE_WIDTH_IN_CHARS = 2
 
 CONFLICT_OUTLINE_COLOR = QColor("red")
 CONFLICT_OUTLINE_WIDTH = 2
@@ -22,6 +24,10 @@ class CodeHighlight:
 
     `outlined` marks a segment that overlaps another selected segment
     coded with a different code, so its band gets a red border.
+
+    `stripe_colors`, when set (2+ entries), means multiple codes share this
+    exact span; the band is painted as alternating diagonal stripes cycling
+    through every color instead of a solid fill of `color`.
     """
 
     start: int
@@ -30,6 +36,7 @@ class CodeHighlight:
     band_index: int
     band_count: int
     outlined: bool = False
+    stripe_colors: tuple[QColor, ...] | None = None
 
 
 class VimTextViewer(QPlainTextEdit):
@@ -686,7 +693,10 @@ class VimTextViewer(QPlainTextEdit):
             band_top = rect.top() + highlight.band_index * band_height
             band_rect = QRectF(rect.left(), band_top, rect.width(), band_height)
 
-            painter.fillRect(band_rect, highlight.color)
+            if highlight.stripe_colors:
+                self._paint_diagonal_stripes(painter, band_rect, highlight.stripe_colors)
+            else:
+                painter.fillRect(band_rect, highlight.color)
             if highlight.outlined:
                 # Outline the full coded-text rect (not the smaller per-user
                 # band) so the border marks the original text, not just this
@@ -696,6 +706,37 @@ class VimTextViewer(QPlainTextEdit):
                 painter.setPen(pen)
                 painter.drawRect(rect)
                 painter.setPen(Qt.NoPen)
+
+    def _paint_diagonal_stripes(
+        self, painter: QPainter, rect: QRectF, colors: tuple[QColor, ...]
+    ) -> None:
+        """Fill `rect` with alternating diagonal (bottom-left to top-right)
+        stripes cycling through `colors`, each roughly two characters wide,
+        so a span coded with multiple codes shows every color at once
+        instead of only the last one painted over the rest."""
+        stripe_width = max(self.fontMetrics().averageCharWidth() * STRIPE_WIDTH_IN_CHARS, 1)
+        shear = rect.height()
+
+        painter.save()
+        painter.setClipRect(rect, Qt.IntersectClip)
+        painter.setPen(Qt.NoPen)
+        x = rect.left() - shear
+        index = 0
+        while x < rect.right() + shear:
+            painter.setBrush(colors[index % len(colors)])
+            painter.drawPolygon(
+                QPolygonF(
+                    [
+                        QPointF(x, rect.bottom()),
+                        QPointF(x + shear, rect.top()),
+                        QPointF(x + shear + stripe_width, rect.top()),
+                        QPointF(x + stripe_width, rect.bottom()),
+                    ]
+                )
+            )
+            x += stripe_width
+            index += 1
+        painter.restore()
 
     def _line_rects_for_range(self, start: int, end: int) -> list[QRect]:
         """Viewport rects covering [start, end), one per visual line it spans.

@@ -1592,20 +1592,34 @@ class MainWindow(QMainWindow):
 
         conflicting_segment_ids = self._overlapping_different_code_segment_ids(segments)
 
-        highlights = []
-        for segment in segments:
+        def segment_color(segment: db.Segment) -> QColor:
             code = codes_by_id.get(segment.code_id)
             color = QColor(code.color if code and code.color else "#ffff00")
             color.setAlpha(HIGHLIGHT_ALPHA)
+            return color
 
+        # Segments sharing a band and the exact same span are multiple codes
+        # applied simultaneously to the same text, so they're grouped into a
+        # single striped highlight (see CodeHighlight.stripe_colors) instead
+        # of each painting a solid rect over the last.
+        groups: dict[tuple[int, int, int], list[db.Segment]] = {}
+        for segment in segments:
+            band_index = band_index_by_username[segment.created_by or ""]
+            key = (band_index, segment.start_offset, segment.end_offset)
+            groups.setdefault(key, []).append(segment)
+
+        highlights = []
+        for (band_index, start, end), group in groups.items():
+            colors = tuple(segment_color(segment) for segment in group)
             highlights.append(
                 CodeHighlight(
-                    start=segment.start_offset,
-                    end=segment.end_offset,
-                    color=color,
-                    band_index=band_index_by_username[segment.created_by or ""],
+                    start=start,
+                    end=end,
+                    color=colors[0],
+                    band_index=band_index,
                     band_count=band_count,
-                    outlined=segment.id in conflicting_segment_ids,
+                    outlined=any(segment.id in conflicting_segment_ids for segment in group),
+                    stripe_colors=colors if len(colors) > 1 else None,
                 )
             )
 

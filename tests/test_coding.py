@@ -134,6 +134,39 @@ def test_coding_an_already_coded_segment_adds_a_second_code(qtbot, tmp_path):
     assert {s.code_id for s in segments} == {outer.id, inner.id}
 
 
+def test_simultaneous_codes_on_the_same_span_are_grouped_into_one_striped_highlight(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    _open_project_with_document(window, tmp_path, content="Hello frustrating world.")
+
+    outer = window.add_code("Outer")
+    inner = window.add_code("Inner")
+    window.apply_segment(outer.id, 6, 16)  # "frustrating"
+    window.apply_segment(inner.id, 6, 16)  # same span, a second code
+
+    highlights = window.viewer._code_highlights
+    assert len(highlights) == 1
+    highlight = highlights[0]
+    assert (highlight.start, highlight.end) == (6, 16)
+    assert highlight.stripe_colors is not None
+    assert len(highlight.stripe_colors) == 2
+
+
+def test_overlapping_but_distinct_spans_are_not_grouped_into_stripes(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    _open_project_with_document(window, tmp_path, content="Hello frustrating world.")
+
+    outer = window.add_code("Outer")
+    inner = window.add_code("Inner")
+    window.apply_segment(outer.id, 0, 24)  # "Hello frustrating world"
+    window.apply_segment(inner.id, 6, 16)  # "frustrating", nested but not identical
+
+    highlights = window.viewer._code_highlights
+    assert len(highlights) == 2
+    assert all(h.stripe_colors is None for h in highlights)
+
+
 def test_coded_segments_pane_shows_every_code_on_the_segment_at_the_cursor(qtbot, tmp_path):
     window = MainWindow()
     qtbot.addWidget(window)
