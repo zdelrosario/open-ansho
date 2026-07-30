@@ -22,6 +22,7 @@ SHORTCUT_SECTIONS = [
             ("Up / Down", "Cycle the matched/highlighted code (with a selection)"),
             ("Enter", "Apply the current code to the selection"),
             ("x", "Delete segment(s) at the cursor, or in the visual selection"),
+            ("Right-click", "Show the standard menu, plus \"Delete Segment\" over a coded span"),
             ("c", "Jump to the next coded segment (selected users only)"),
             ("C", "Jump to the previous coded segment (selected users only)"),
             ("h j k l", "Move left / down / up / right (arrow keys also work)"),

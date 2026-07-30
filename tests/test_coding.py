@@ -184,6 +184,85 @@ def test_remove_code_from_selection_only_deletes_that_codes_segment(qtbot, tmp_p
     assert segments[0].code_id == outer.id
 
 
+def _stub_context_menu_choosing(monkeypatch, label):
+    """PySide6 doesn't let tests monkeypatch QMenu.exec itself (it still runs
+    the real modal loop and hangs headless), so MainWindow exposes
+    `_exec_context_menu` as the seam to stub instead."""
+    captured = {}
+
+    def fake_exec(_self, menu, _global_pos):
+        captured["labels"] = [action.text() for action in menu.actions()]
+        for action in menu.actions():
+            if action.text() == label:
+                return action
+        return None
+
+    monkeypatch.setattr(MainWindow, "_exec_context_menu", fake_exec)
+    return captured
+
+
+def test_viewer_context_menu_deletes_the_segment_under_the_click(qtbot, tmp_path, monkeypatch):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    _open_project_with_document(window, tmp_path, content="Hello frustrating world.")
+
+    code = window.add_code("Frustration")
+    window.apply_segment(code.id, 6, 16)  # "frustrating"
+
+    cursor = QTextCursor(window.viewer.document())
+    cursor.setPosition(8)
+    point = window.viewer.cursorRect(cursor).center()
+
+    _stub_context_menu_choosing(monkeypatch, 'Delete Segment ("Frustration")')
+    window._on_viewer_context_menu(point)
+
+    assert db.list_segments_for_document(window.conn, window._current_document_id) == []
+
+
+def test_viewer_context_menu_offers_one_delete_action_per_overlapping_code(qtbot, tmp_path, monkeypatch):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    _open_project_with_document(window, tmp_path, content="Hello frustrating world.")
+
+    outer = window.add_code("Outer")
+    inner = window.add_code("Inner")
+    window.apply_segment(outer.id, 6, 16)
+    window.apply_segment(inner.id, 6, 16)
+
+    cursor = QTextCursor(window.viewer.document())
+    cursor.setPosition(8)
+    point = window.viewer.cursorRect(cursor).center()
+
+    captured = _stub_context_menu_choosing(monkeypatch, 'Delete Segment ("Inner")')
+    window._on_viewer_context_menu(point)
+
+    assert 'Delete Segment ("Outer")' in captured["labels"]
+    assert 'Delete Segment ("Inner")' in captured["labels"]
+
+    segments = db.list_segments_for_document(window.conn, window._current_document_id)
+    assert len(segments) == 1
+    assert segments[0].code_id == outer.id
+
+
+def test_viewer_context_menu_has_no_delete_action_off_a_segment(qtbot, tmp_path, monkeypatch):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    _open_project_with_document(window, tmp_path, content="Hello frustrating world.")
+
+    code = window.add_code("Frustration")
+    window.apply_segment(code.id, 6, 16)  # "frustrating"
+
+    cursor = QTextCursor(window.viewer.document())
+    cursor.setPosition(0)  # "Hello", outside the coded span
+    point = window.viewer.cursorRect(cursor).center()
+
+    captured = _stub_context_menu_choosing(monkeypatch, "unused")
+    window._on_viewer_context_menu(point)
+
+    assert not any("Delete Segment" in label for label in captured["labels"])
+    assert len(db.list_segments_for_document(window.conn, window._current_document_id)) == 1
+
+
 def test_double_clicking_a_code_applies_it_and_preserves_the_selection(qtbot, tmp_path):
     window = MainWindow()
     qtbot.addWidget(window)

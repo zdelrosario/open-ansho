@@ -244,6 +244,8 @@ class MainWindow(QMainWindow):
         self.viewer.modeChanged.connect(self._on_viewer_mode_changed)
         self.viewer.searchTextChanged.connect(self._on_viewer_search_text_changed)
         self.viewer.contentEdited.connect(self._on_viewer_content_edited)
+        self.viewer.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.viewer.customContextMenuRequested.connect(self._on_viewer_context_menu)
 
         self.code_tree = CodeTreeWidget()
         self.code_tree.setHeaderHidden(True)
@@ -915,6 +917,43 @@ class MainWindow(QMainWindow):
         chosen = menu.exec(self.segment_list.viewport().mapToGlobal(pos))
         if chosen is remove_action:
             self._remove_code_from_viewer_selection(code_id)
+
+    def _on_viewer_context_menu(self, pos) -> None:
+        # Start from the viewer's own standard menu (Copy, Select All, ...) so
+        # right-clicking off a coded segment still behaves like a normal
+        # read-only text edit.
+        menu = self.viewer.createStandardContextMenu()
+        delete_actions = {}
+        if self.conn is not None and self._current_document_id is not None:
+            position = self.viewer.cursorForPosition(pos).position()
+            segments = db.list_segments_for_document(self.conn, self._current_document_id)
+            intersecting = [s for s in segments if s.start_offset <= position < s.end_offset]
+            if intersecting:
+                codes_by_id = {code.id: code for code in db.list_codes(self.conn)}
+                menu.addSeparator()
+                for segment in intersecting:
+                    code = codes_by_id.get(segment.code_id)
+                    label = f'Delete Segment ("{code.name}")' if code else "Delete Segment"
+                    delete_actions[menu.addAction(label)] = segment.id
+
+        chosen = self._exec_context_menu(menu, self.viewer.viewport().mapToGlobal(pos))
+        if chosen in delete_actions:
+            self._delete_segment(delete_actions[chosen])
+
+    def _exec_context_menu(self, menu: QMenu, global_pos):
+        """Thin wrapper around QMenu.exec so tests can stub out the modal
+        popup (PySide6 doesn't allow monkeypatching QMenu.exec itself)."""
+        return menu.exec(global_pos)
+
+    def _delete_segment(self, segment_id: int) -> None:
+        if self.conn is None:
+            return
+        db.delete_segment(self.conn, segment_id)
+        self._refresh_user_filter()
+        self._refresh_codes()
+        self._refresh_highlights()
+        self._segments_panel_mode = "cursor"
+        self._render_segments_panel()
 
     def _on_export_csv(self) -> None:
         if self.conn is None:
