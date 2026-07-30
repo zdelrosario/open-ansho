@@ -558,7 +558,7 @@ class MainWindow(QMainWindow):
             path_str += ".sqlite"
         path = Path(path_str)
         self.create_project(path)
-        self._ensure_username(path)
+        self._ensure_username()
 
     def _on_open_project(self) -> None:
         path_str, _ = QFileDialog.getOpenFileName(self, "Open Project", "", PROJECT_FILTER)
@@ -566,16 +566,16 @@ class MainWindow(QMainWindow):
             return
         path = Path(path_str)
         self.open_project(path)
-        self._ensure_username(path)
+        self._ensure_username()
 
     def _on_open_recent_project(self, path: Path) -> None:
         self.open_project(path)
-        self._ensure_username(path)
+        self._ensure_username()
 
-    def _ensure_username(self, path: Path) -> str | None:
-        """Prompt for a username the first time this project's directory is
-        opened, then reuse the stored name silently on later opens."""
-        existing = user.read_username(path)
+    def _ensure_username(self) -> str | None:
+        """Prompt for a username the first time this machine's app install is
+        used, then reuse the stored name silently from then on."""
+        existing = user.read_username()
         if existing:
             self.username = existing
             self._update_username_label()
@@ -585,11 +585,23 @@ class MainWindow(QMainWindow):
         name = name.strip() if ok else ""
         if not name:
             return None
-        user.write_username(path, name)
+        user.write_username(name)
         self.username = name
         self._update_username_label()
         self._apply_active_user_default_filter()
         return name
+
+    def _on_change_username(self) -> None:
+        name, ok = QInputDialog.getText(
+            self, "Change Username", "Enter your username:", text=self.username or ""
+        )
+        name = name.strip() if ok else ""
+        if not name:
+            return
+        user.write_username(name)
+        self.username = name
+        self._update_username_label()
+        self._apply_active_user_default_filter()
 
     def _apply_active_user_default_filter(self) -> None:
         """Re-derive the user filter's defaults now that `self.username` is known.
@@ -1050,6 +1062,7 @@ class MainWindow(QMainWindow):
     def _on_show_preferences(self) -> None:
         dialog = PreferencesDialog(self._dark_mode, self)
         dialog.darkModeToggled.connect(self.set_dark_mode)
+        dialog.changeUsernameRequested.connect(self._on_change_username)
         dialog.exec()
 
     # -- Testable logic, independent of QFileDialog / QMessageBox ---------

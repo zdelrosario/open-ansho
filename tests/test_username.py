@@ -2,55 +2,49 @@ from openansho import db, user
 from openansho.ui.main_window import NO_USERNAME_TEXT, MainWindow
 
 
-def test_read_username_missing_file_returns_none(tmp_path):
-    project_path = tmp_path / "project.sqlite"
-    assert user.read_username(project_path) is None
+def test_read_username_missing_file_returns_none():
+    assert user.read_username() is None
 
 
-def test_write_then_read_username_roundtrips(tmp_path):
-    project_path = tmp_path / "project.sqlite"
-    user.write_username(project_path, "alice")
-    assert user.read_username(project_path) == "alice"
+def test_write_then_read_username_roundtrips():
+    user.write_username("alice")
+    assert user.read_username() == "alice"
 
 
-def test_username_file_lives_next_to_project(tmp_path):
-    project_path = tmp_path / "subdir" / "project.sqlite"
-    project_path.parent.mkdir()
-    user.write_username(project_path, "alice")
-    assert (project_path.parent / ".openansho_user").exists()
+def test_username_file_lives_in_the_application_directory():
+    user.write_username("alice")
+    assert (user.application_directory() / ".openansho_user").exists()
 
 
 def test_ensure_username_prompts_when_no_sidecar_file(qtbot, tmp_path, monkeypatch):
     window = MainWindow()
     qtbot.addWidget(window)
-    project_path = tmp_path / "project.sqlite"
-    window.create_project(project_path)
+    window.create_project(tmp_path / "project.sqlite")
 
     monkeypatch.setattr(
         "openansho.ui.main_window.QInputDialog.getText",
         lambda *args, **kwargs: ("alice", True),
     )
 
-    result = window._ensure_username(project_path)
+    result = window._ensure_username()
 
     assert result == "alice"
     assert window.username == "alice"
-    assert user.read_username(project_path) == "alice"
+    assert user.read_username() == "alice"
 
 
 def test_ensure_username_reuses_stored_name_without_prompting(qtbot, tmp_path, monkeypatch):
     window = MainWindow()
     qtbot.addWidget(window)
-    project_path = tmp_path / "project.sqlite"
-    window.create_project(project_path)
-    user.write_username(project_path, "bob")
+    window.create_project(tmp_path / "project.sqlite")
+    user.write_username("bob")
 
     def fail_if_called(*args, **kwargs):
         raise AssertionError("should not prompt when a username is already stored")
 
     monkeypatch.setattr("openansho.ui.main_window.QInputDialog.getText", fail_if_called)
 
-    result = window._ensure_username(project_path)
+    result = window._ensure_username()
 
     assert result == "bob"
     assert window.username == "bob"
@@ -59,31 +53,29 @@ def test_ensure_username_reuses_stored_name_without_prompting(qtbot, tmp_path, m
 def test_ensure_username_cancel_leaves_username_unset(qtbot, tmp_path, monkeypatch):
     window = MainWindow()
     qtbot.addWidget(window)
-    project_path = tmp_path / "project.sqlite"
-    window.create_project(project_path)
+    window.create_project(tmp_path / "project.sqlite")
 
     monkeypatch.setattr(
         "openansho.ui.main_window.QInputDialog.getText",
         lambda *args, **kwargs: ("", False),
     )
 
-    result = window._ensure_username(project_path)
+    result = window._ensure_username()
 
     assert result is None
     assert window.username is None
-    assert user.read_username(project_path) is None
+    assert user.read_username() is None
 
 
 def test_apply_segment_records_current_username(qtbot, tmp_path, monkeypatch):
     window = MainWindow()
     qtbot.addWidget(window)
-    project_path = tmp_path / "project.sqlite"
-    window.create_project(project_path)
+    window.create_project(tmp_path / "project.sqlite")
     monkeypatch.setattr(
         "openansho.ui.main_window.QInputDialog.getText",
         lambda *args, **kwargs: ("alice", True),
     )
-    window._ensure_username(project_path)
+    window._ensure_username()
 
     doc_path = tmp_path / "doc.txt"
     doc_path.write_text("Hello world.", encoding="utf-8")
@@ -100,13 +92,12 @@ def test_apply_segment_records_current_username(qtbot, tmp_path, monkeypatch):
 def test_segment_list_shows_document_name_and_username(qtbot, tmp_path, monkeypatch):
     window = MainWindow()
     qtbot.addWidget(window)
-    project_path = tmp_path / "project.sqlite"
-    window.create_project(project_path)
+    window.create_project(tmp_path / "project.sqlite")
     monkeypatch.setattr(
         "openansho.ui.main_window.QInputDialog.getText",
         lambda *args, **kwargs: ("alice", True),
     )
-    window._ensure_username(project_path)
+    window._ensure_username()
 
     doc_path = tmp_path / "doc.txt"
     doc_path.write_text("Hello frustrating world.", encoding="utf-8")
@@ -124,8 +115,7 @@ def test_segment_list_shows_document_name_and_username(qtbot, tmp_path, monkeypa
 def test_segment_list_shows_placeholder_for_segments_with_no_username(qtbot, tmp_path):
     window = MainWindow()
     qtbot.addWidget(window)
-    project_path = tmp_path / "project.sqlite"
-    window.create_project(project_path)
+    window.create_project(tmp_path / "project.sqlite")
 
     doc_path = tmp_path / "doc.txt"
     doc_path.write_text("Hello frustrating world.", encoding="utf-8")
@@ -149,15 +139,14 @@ def test_username_label_shows_placeholder_when_no_username(qtbot):
 def test_username_label_updates_after_ensure_username(qtbot, tmp_path, monkeypatch):
     window = MainWindow()
     qtbot.addWidget(window)
-    project_path = tmp_path / "project.sqlite"
-    window.create_project(project_path)
+    window.create_project(tmp_path / "project.sqlite")
     assert window.username_label.text() == NO_USERNAME_TEXT
 
     monkeypatch.setattr(
         "openansho.ui.main_window.QInputDialog.getText",
         lambda *args, **kwargs: ("alice", True),
     )
-    window._ensure_username(project_path)
+    window._ensure_username()
 
     assert window.username_label.text() == "alice"
 
@@ -165,15 +154,76 @@ def test_username_label_updates_after_ensure_username(qtbot, tmp_path, monkeypat
 def test_username_label_resets_to_placeholder_on_close_project(qtbot, tmp_path, monkeypatch):
     window = MainWindow()
     qtbot.addWidget(window)
-    project_path = tmp_path / "project.sqlite"
-    window.create_project(project_path)
+    window.create_project(tmp_path / "project.sqlite")
     monkeypatch.setattr(
         "openansho.ui.main_window.QInputDialog.getText",
         lambda *args, **kwargs: ("alice", True),
     )
-    window._ensure_username(project_path)
+    window._ensure_username()
     assert window.username_label.text() == "alice"
 
     window.close_project()
 
     assert window.username_label.text() == NO_USERNAME_TEXT
+
+
+def test_change_username_updates_username_and_sidecar_file(qtbot, monkeypatch):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.username = "alice"
+
+    monkeypatch.setattr(
+        "openansho.ui.main_window.QInputDialog.getText",
+        lambda *args, **kwargs: ("bob", True),
+    )
+
+    window._on_change_username()
+
+    assert window.username == "bob"
+    assert window.username_label.text() == "bob"
+    assert user.read_username() == "bob"
+
+
+def test_change_username_prefills_the_current_username(qtbot, monkeypatch):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.username = "alice"
+
+    captured = {}
+
+    def fake_get_text(_parent, _title, _label, text=""):
+        captured["prefilled"] = text
+        return ("bob", True)
+
+    monkeypatch.setattr("openansho.ui.main_window.QInputDialog.getText", fake_get_text)
+
+    window._on_change_username()
+
+    assert captured["prefilled"] == "alice"
+
+
+def test_change_username_cancel_leaves_username_unchanged(qtbot, monkeypatch):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.username = "alice"
+    user.write_username("alice")
+
+    monkeypatch.setattr(
+        "openansho.ui.main_window.QInputDialog.getText",
+        lambda *args, **kwargs: ("", False),
+    )
+
+    window._on_change_username()
+
+    assert window.username == "alice"
+    assert user.read_username() == "alice"
+
+
+def test_preferences_dialog_change_username_button_emits_signal(qtbot):
+    from openansho.ui.preferences_dialog import PreferencesDialog
+
+    dialog = PreferencesDialog(dark_mode=False)
+    qtbot.addWidget(dialog)
+
+    with qtbot.waitSignal(dialog.changeUsernameRequested, timeout=1000):
+        dialog.change_username_button.click()

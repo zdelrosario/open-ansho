@@ -10,3 +10,4 @@ dist/
 *.sqlite3
 planning
 \#planning\#
+.openansho_user

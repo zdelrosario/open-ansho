@@ -214,9 +214,9 @@ def test_reopening_project_resets_filter_to_only_the_active_user(qtbot, tmp_path
     assert _checked_labels(window.user_filter_combo) == {"alice", "bob"}
 
     project_path = window.project_path
-    user.write_username(project_path, "alice")
+    user.write_username("alice")
     window._set_connection(*_reopen(project_path))
-    window._ensure_username(project_path)
+    window._ensure_username()
 
     assert _checked_labels(window.user_filter_combo) == {"alice"}
 
