@@ -44,7 +44,8 @@ class VimTextViewer(QPlainTextEdit):
 
     Normal mode moves a visible block cursor with h/j/k/l, w/b/e, 0/$, gg/G.
     Pressing v enters visual mode, where the same motions extend a text
-    selection instead of just moving the cursor. Shift+W/B/E are vim's
+    selection instead of just moving the cursor. Shift+V enters visual
+    mode with the entire current line selected. Shift+W/B/E are vim's
     "WORD" variants: they treat any run of non-blank characters as a
     single unit, so punctuation around or inside a word never stops them
     (unlike lowercase w/b/e, which treat punctuation as its own word).
@@ -256,7 +257,10 @@ class VimTextViewer(QPlainTextEdit):
         if key == Qt.Key_V:
             self._pending_g = False
             self._pending_z = False
-            self._toggle_visual_mode()
+            if shift:
+                self._select_current_line()
+            else:
+                self._toggle_visual_mode()
             event.accept()
             return
 
@@ -408,6 +412,14 @@ class VimTextViewer(QPlainTextEdit):
         if self.mode != self.VISUAL:
             self.mode = self.VISUAL
             self.modeChanged.emit(self.mode)
+
+    def _select_current_line(self) -> None:
+        self._enter_visual_mode()
+        block = self.textCursor().block()
+        cursor = self.textCursor()
+        cursor.setPosition(block.position())
+        cursor.setPosition(block.position() + len(block.text()), QTextCursor.KeepAnchor)
+        self.setTextCursor(cursor)
 
     def _enter_search_mode(self) -> None:
         self.mode = self.SEARCH

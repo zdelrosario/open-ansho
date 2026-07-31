@@ -37,6 +37,7 @@ SHORTCUT_SECTIONS = [
             ("Ctrl+E / Ctrl+Y", "Scroll the viewport down / up by one line"),
             ("f<char> / F<char>", "Jump forward / backward to next occurrence of char in document"),
             ("v", "Toggle visual (selection) mode"),
+            ("V", "Enter visual mode with the entire current line selected"),
             ("i", "Enter insert (text editing) mode"),
             ("/", "Enter search mode (regex, smartcase)"),
             ("n / N", "Repeat last search forward / backward"),

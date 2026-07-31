@@ -296,6 +296,32 @@ def test_visual_mode_motions_extend_selection(qtbot):
     assert cursor.selectedText() == "Hello"
 
 
+def test_shift_v_enters_visual_mode_and_selects_current_line(qtbot):
+    viewer = _make_viewer(qtbot)
+    viewer.setFocus()
+    QTest.keyClick(viewer, Qt.Key_L)
+    QTest.keyClick(viewer, Qt.Key_L)
+
+    QTest.keyClick(viewer, Qt.Key_V, Qt.ShiftModifier)
+
+    assert viewer.mode == VimTextViewer.VISUAL
+    cursor = viewer.textCursor()
+    assert cursor.hasSelection()
+    assert cursor.selectedText() == "Hello frustrating world."
+
+
+def test_shift_v_selects_current_line_on_second_line(qtbot):
+    viewer = _make_viewer(qtbot)
+    viewer.setFocus()
+    QTest.keyClick(viewer, Qt.Key_G, Qt.ShiftModifier)
+
+    QTest.keyClick(viewer, Qt.Key_V, Qt.ShiftModifier)
+
+    cursor = viewer.textCursor()
+    assert cursor.hasSelection()
+    assert cursor.selectedText() == "Second line here."
+
+
 def test_v_again_exits_visual_mode_and_clears_selection(qtbot):
     viewer = _make_viewer(qtbot)
     viewer.setFocus()
