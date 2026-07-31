@@ -389,6 +389,17 @@ class MainWindow(QMainWindow):
 
     def eventFilter(self, watched, event) -> bool:
         if event.type() == QEvent.KeyPress:
+            # These pane shortcuts (Space, Escape, x, c, ?, ...) are only meant to
+            # apply while focus is somewhere inside this window's own panes. When a
+            # separate top-level widget has focus instead — most commonly a modal
+            # dialog like the code description editor's QInputDialog — this filter
+            # must stand down entirely, or it'll steal keys (e.g. swallowing Space
+            # meant to be typed into the dialog's text box) that were never meant
+            # for these shortcuts at all.
+            focus_widget = QApplication.focusWidget()
+            if focus_widget is None or (focus_widget is not self and not self.isAncestorOf(focus_widget)):
+                return super().eventFilter(watched, event)
+
             # While the viewer is awaiting the f/F target character, every global
             # shortcut below must stand down for this one keypress so the
             # character reaches VimTextViewer's own key handling intact, whatever

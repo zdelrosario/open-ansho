@@ -1,6 +1,7 @@
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QTextCursor
 from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QLineEdit
 
 from openansho import db
 from openansho.ui.main_window import MainWindow
@@ -14,6 +15,29 @@ def _open_project_with_document(window, tmp_path, content="Hello frustrating wor
     window.import_document(doc_path)
     window.document_list.setCurrentRow(0)
     return doc_path
+
+
+def test_space_key_is_not_hijacked_outside_the_main_window(qtbot, tmp_path):
+    """Regression test: a modal dialog (e.g. the code description editor)
+    must receive Space as ordinary text, not have it stolen by the
+    global eventFilter's "jump focus to the code filter" shortcut, which
+    is only meant to apply while focus is inside this window's own panes.
+    """
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    _open_project_with_document(window, tmp_path)
+
+    external_field = QLineEdit()
+    qtbot.addWidget(external_field)
+    external_field.show()
+    external_field.setFocus()
+    qtbot.waitUntil(lambda: external_field.hasFocus())
+
+    QTest.keyClick(external_field, Qt.Key_Space)
+
+    assert external_field.text() == " "
+    assert not window.code_filter_input.hasFocus()
 
 
 def test_line_position_label_shows_line_number_and_percentage(qtbot, tmp_path):
