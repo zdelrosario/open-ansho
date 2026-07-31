@@ -16,6 +16,25 @@ def _open_project_with_document(window, tmp_path, content="Hello frustrating wor
     return doc_path
 
 
+def test_line_position_label_shows_line_number_and_percentage(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    _open_project_with_document(window, tmp_path, content="one\ntwo\nthree\nfour")
+
+    assert window.line_position_label.text() == "1/25%"
+
+    window.viewer.setFocus()
+    qtbot.waitUntil(lambda: window.viewer.hasFocus())
+    QTest.keyClick(window.viewer, Qt.Key_J)
+    QTest.keyClick(window.viewer, Qt.Key_J)
+
+    assert window.line_position_label.text() == "3/75%"
+
+    QTest.keyClick(window.viewer, Qt.Key_G, Qt.ShiftModifier)
+    assert window.line_position_label.text() == "4/100%"
+
+
 def test_mode_label_shows_visual_when_entering_visual_mode(qtbot, tmp_path):
     window = MainWindow()
     qtbot.addWidget(window)

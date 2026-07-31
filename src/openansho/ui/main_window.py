@@ -337,7 +337,10 @@ class MainWindow(QMainWindow):
         self.insert_mode_button.setCheckable(True)
         self.insert_mode_button.toggled.connect(self._on_insert_mode_button_toggled)
 
+        self.line_position_label = QLabel()
+
         viewer_bottom_bar = QHBoxLayout()
+        viewer_bottom_bar.addWidget(self.line_position_label)
         viewer_bottom_bar.addStretch()
         viewer_bottom_bar.addWidget(self.insert_mode_button)
 
@@ -681,6 +684,12 @@ class MainWindow(QMainWindow):
 
     def _on_viewer_search_text_changed(self, text: str) -> None:
         self.search_label.setText(f"/{text}" if text else "")
+
+    def _update_line_position_label(self) -> None:
+        total_lines = self.viewer.document().blockCount()
+        current_line = self.viewer.textCursor().blockNumber() + 1
+        percentage = round(current_line / total_lines * 100)
+        self.line_position_label.setText(f"{current_line}/{percentage}%")
 
     def _on_code_selected(
         self, current: QTreeWidgetItem | None, _previous: QTreeWidgetItem | None
@@ -1657,6 +1666,7 @@ class MainWindow(QMainWindow):
         return conflicting
 
     def _on_viewer_cursor_moved(self) -> None:
+        self._update_line_position_label()
         if len(self._selected_usernames()) > 1:
             self._segments_panel_mode = "cursor"
             self._render_segments_panel()

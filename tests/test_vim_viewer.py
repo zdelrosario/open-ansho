@@ -185,6 +185,83 @@ def test_zz_centers_viewport_without_moving_cursor(qtbot, monkeypatch):
     assert viewer.textCursor().position() == position_before
 
 
+def test_zt_scrolls_current_line_to_top_without_moving_cursor(qtbot, monkeypatch):
+    viewer = _make_viewer(qtbot)
+    viewer.setFocus()
+    QTest.keyClick(viewer, Qt.Key_L)
+    position_before = viewer.textCursor().position()
+
+    calls = []
+    monkeypatch.setattr(viewer, "_scroll_current_line_to_top", lambda: calls.append(True))
+
+    QTest.keyClick(viewer, Qt.Key_Z)
+    assert calls == []  # a lone z does not scroll yet
+
+    QTest.keyClick(viewer, Qt.Key_T)
+    assert calls == [True]
+    assert viewer.textCursor().position() == position_before
+
+
+def test_zb_scrolls_current_line_to_bottom_without_moving_cursor(qtbot, monkeypatch):
+    viewer = _make_viewer(qtbot)
+    viewer.setFocus()
+    QTest.keyClick(viewer, Qt.Key_L)
+    position_before = viewer.textCursor().position()
+
+    calls = []
+    monkeypatch.setattr(viewer, "_scroll_current_line_to_bottom", lambda: calls.append(True))
+
+    QTest.keyClick(viewer, Qt.Key_Z)
+    QTest.keyClick(viewer, Qt.Key_B)
+    assert calls == [True]
+    assert viewer.textCursor().position() == position_before
+
+
+def test_z_then_other_key_does_not_scroll(qtbot, monkeypatch):
+    viewer = _make_viewer(qtbot)
+    viewer.setFocus()
+
+    top_calls = []
+    bottom_calls = []
+    monkeypatch.setattr(viewer, "_scroll_current_line_to_top", lambda: top_calls.append(True))
+    monkeypatch.setattr(viewer, "_scroll_current_line_to_bottom", lambda: bottom_calls.append(True))
+
+    QTest.keyClick(viewer, Qt.Key_Z)
+    QTest.keyClick(viewer, Qt.Key_L)
+
+    assert top_calls == []
+    assert bottom_calls == []
+    assert viewer.textCursor().position() == 1
+
+
+def test_ctrl_e_scrolls_viewport_down_one_line(qtbot, monkeypatch):
+    viewer = _make_viewer(qtbot)
+    viewer.setFocus()
+    position_before = viewer.textCursor().position()
+
+    calls = []
+    monkeypatch.setattr(viewer, "_scroll_viewport_lines", lambda delta: calls.append(delta))
+
+    QTest.keyClick(viewer, Qt.Key_E, Qt.ControlModifier)
+
+    assert calls == [1]
+    assert viewer.textCursor().position() == position_before
+
+
+def test_ctrl_y_scrolls_viewport_up_one_line(qtbot, monkeypatch):
+    viewer = _make_viewer(qtbot)
+    viewer.setFocus()
+    position_before = viewer.textCursor().position()
+
+    calls = []
+    monkeypatch.setattr(viewer, "_scroll_viewport_lines", lambda delta: calls.append(delta))
+
+    QTest.keyClick(viewer, Qt.Key_Y, Qt.ControlModifier)
+
+    assert calls == [-1]
+    assert viewer.textCursor().position() == position_before
+
+
 def test_cursor_highlight_stays_visible_at_document_end(qtbot):
     viewer = _make_viewer(qtbot, "Hi")
     viewer.setFocus()

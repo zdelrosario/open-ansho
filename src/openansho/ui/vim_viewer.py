@@ -53,7 +53,10 @@ class VimTextViewer(QPlainTextEdit):
     viewport-relative instead: H jumps to the start of the first line
     currently visible in the viewport, L to the start of the last one,
     M to the start of the middle one. zz scrolls the viewport so the
-    current cursor line is centered, without moving the cursor itself.
+    current cursor line is centered, zt scrolls it to the top, and zb
+    scrolls it to the bottom, all without moving the cursor itself.
+    Ctrl+E/Ctrl+Y scroll the viewport down/up by one line, also without
+    moving the cursor.
 
     f followed by any character jumps forward to the next occurrence of
     that character anywhere in the document (case-sensitive), crossing
@@ -288,8 +291,27 @@ class VimTextViewer(QPlainTextEdit):
             event.accept()
             return
 
+        if self._pending_z and key in (Qt.Key_T, Qt.Key_B) and not shift:
+            self._pending_z = False
+            if key == Qt.Key_T:
+                self._scroll_current_line_to_top()
+            else:
+                self._scroll_current_line_to_bottom()
+            event.accept()
+            return
+
         self._pending_g = False
         self._pending_z = False
+
+        if key == Qt.Key_E and event.modifiers() & Qt.ControlModifier:
+            self._scroll_viewport_lines(1)
+            event.accept()
+            return
+
+        if key == Qt.Key_Y and event.modifiers() & Qt.ControlModifier:
+            self._scroll_viewport_lines(-1)
+            event.accept()
+            return
 
         if key == Qt.Key_H:
             if shift:
@@ -598,6 +620,22 @@ class VimTextViewer(QPlainTextEdit):
         starts = self._visible_line_starts()
         if starts:
             self._set_position(starts[len(starts) // 2])
+
+    def _scroll_current_line_to_top(self) -> None:
+        """Handle zt: scroll the viewport so the cursor's line is at the top, without moving the cursor."""
+        self.verticalScrollBar().setValue(self.textCursor().blockNumber())
+
+    def _scroll_current_line_to_bottom(self) -> None:
+        """Handle zb: scroll the viewport so the cursor's line is at the bottom, without moving the cursor."""
+        block_number = self.textCursor().blockNumber()
+        line_height = max(self.fontMetrics().height(), 1)
+        visible_lines = max(self.viewport().height() // line_height, 1)
+        self.verticalScrollBar().setValue(max(block_number - visible_lines + 1, 0))
+
+    def _scroll_viewport_lines(self, delta: int) -> None:
+        """Handle Ctrl+E/Ctrl+Y: scroll the viewport by one line without moving the cursor."""
+        scrollbar = self.verticalScrollBar()
+        scrollbar.setValue(scrollbar.value() + delta)
 
     def _find_char(self, char: str, direction: int) -> None:
         """Handle the `f`/`F` motions: jump to the next/previous occurrence
