@@ -61,6 +61,20 @@ clean:
 	rm -rf $(BUILD_DIR) $(DIST_DIR) *.spec
 
 # --- Platform builds --------------------------------------------------------
+#
+# Windows and Linux build with --onefile, which bundles the interpreter, Qt,
+# and the app into a single self-contained executable. PyInstaller's default
+# one-dir mode instead emits the executable next to an _internal/ folder
+# holding the interpreter library (python311.dll / libpython3.11.so), which the
+# launcher resolves relative to its own location — so the moment someone
+# downloads or copies just the executable (e.g. grabbing the single file off
+# the `builds` branch, where GitHub only offers per-file downloads), it dies
+# with "Failed to load Python DLL ...\_internal\python311.dll" or the Linux
+# equivalent. A single file has no such loose ends. Costs a few seconds of
+# startup while it unpacks to a temp dir.
+#
+# macOS stays one-dir: --windowed there produces a .app bundle, which already
+# travels as one object in Finder and in a zip.
 
 build-mac: install-build
 	$(PYINSTALLER) --name "$(APP_NAME)" --windowed --noconfirm --clean \
@@ -69,13 +83,13 @@ build-mac: install-build
 		$(ENTRY_POINT)
 
 build-windows: install-build
-	$(PYINSTALLER) --name "$(APP_NAME)" --windowed --noconfirm --clean \
+	$(PYINSTALLER) --name "$(APP_NAME)" --windowed --onefile --noconfirm --clean \
 		--icon $(ICON) --add-data "$(ADD_DATA)" \
 		--distpath $(DIST_DIR)/windows --workpath $(BUILD_DIR)/windows \
 		$(ENTRY_POINT)
 
 build-linux: install-build
-	$(PYINSTALLER) --name "$(APP_NAME)" --noconfirm --clean \
+	$(PYINSTALLER) --name "$(APP_NAME)" --onefile --noconfirm --clean \
 		--add-data "$(ADD_DATA)" \
 		--distpath $(DIST_DIR)/linux --workpath $(BUILD_DIR)/linux \
 		$(ENTRY_POINT)
