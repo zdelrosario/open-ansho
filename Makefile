@@ -73,14 +73,29 @@ clean:
 # equivalent. A single file has no such loose ends. Costs a few seconds of
 # startup while it unpacks to a temp dir.
 #
-# macOS stays one-dir: --windowed there produces a .app bundle, which already
-# travels as one object in Finder and in a zip.
+# macOS stays one-dir, since --windowed there wraps the result in a .app bundle
+# and a bundle is a directory by definition.
+#
+# Both Linux and macOS ship their result as a tarball (see build-linux for the
+# full reasoning). The short version: the artifact pipeline mangles anything it
+# ships loose. actions/upload-artifact zips without preserving Unix modes, and
+# an HTTP download carries no permission metadata at all, so the executable bit
+# is gone by the time a user has the file. macOS additionally needs the archive
+# because upload-artifact follows symlinks: it dereferences every
+# Versions/Current -> Versions/A link inside the Qt frameworks into a second
+# full copy, which both doubles the size and invalidates the _CodeSignature
+# manifest that describes the symlinked layout. tar records modes and symlinks
+# inside the archive, so all of it survives however the archive travelled.
 
 build-mac: install-build
 	$(PYINSTALLER) --name "$(APP_NAME)" --windowed --noconfirm --clean \
 		--icon $(ICON) --add-data "$(ADD_DATA)" \
 		--distpath $(DIST_DIR)/mac --workpath $(BUILD_DIR)/mac \
 		$(ENTRY_POINT)
+	chmod +x "$(DIST_DIR)/mac/$(APP_NAME).app/Contents/MacOS/$(APP_NAME)"
+	COPYFILE_DISABLE=1 tar -czf $(DIST_DIR)/mac/$(APP_NAME)-mac.tar.gz \
+		-C $(DIST_DIR)/mac "$(APP_NAME).app"
+	rm -rf "$(DIST_DIR)/mac/$(APP_NAME).app" $(DIST_DIR)/mac/$(APP_NAME)
 
 build-windows: install-build
 	$(PYINSTALLER) --name "$(APP_NAME)" --windowed --onefile --noconfirm --clean \
@@ -88,11 +103,27 @@ build-windows: install-build
 		--distpath $(DIST_DIR)/windows --workpath $(BUILD_DIR)/windows \
 		$(ENTRY_POINT)
 
+# The Linux binary ships as a tarball rather than a bare ELF file, because the
+# executable bit does not survive the trip to a user's machine otherwise. Two
+# separate things strip it: actions/upload-artifact zips without preserving Unix
+# modes (so the `builds` branch ends up with 100644 blobs), and an HTTP download
+# carries no permission metadata at all, so even a 100755 blob lands as 644 when
+# fetched through GitHub's "Download raw file". A non-executable ELF doesn't run
+# — GNOME Files reports "There is no app installed for Executable files" instead
+# of launching it. tar records the mode inside the archive, so extracting yields
+# a binary that is executable no matter how the archive travelled.
+#
+# Only the tarball is left in the dist directory: shipping the loose binary
+# alongside it would just be a broken file for people to download by mistake.
 build-linux: install-build
 	$(PYINSTALLER) --name "$(APP_NAME)" --onefile --noconfirm --clean \
 		--add-data "$(ADD_DATA)" \
 		--distpath $(DIST_DIR)/linux --workpath $(BUILD_DIR)/linux \
 		$(ENTRY_POINT)
+	chmod +x $(DIST_DIR)/linux/$(APP_NAME)
+	tar -czf $(DIST_DIR)/linux/$(APP_NAME)-linux.tar.gz \
+		-C $(DIST_DIR)/linux $(APP_NAME)
+	rm $(DIST_DIR)/linux/$(APP_NAME)
 
 # Convenience: build for whatever OS `make` is currently running on.
 UNAME_S := $(shell uname -s 2>/dev/null)
