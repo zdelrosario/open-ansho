@@ -7,6 +7,8 @@ Open Ansho is a free and open-source desktop app for qualitative data analysis o
 - Clarity: Visually compare overlapping code segments through vertically-separated split highlights. Easily see simultaneous coding through striped segments.
 - Lightweight: No bloat. Just fast coding.
 
+Documents can be imported as plain text (`.txt`) or Microsoft Word (`.docx`) files; Word documents are converted to plain text on import, one line per paragraph.
+
 This software was created using Claude Code.
 
 ## Download and Run

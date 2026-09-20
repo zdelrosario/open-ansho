@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
     QWidgetAction,
 )
 
-from openansho import db, reporting, user
+from openansho import db, reporting, text_extract, user
 from openansho.db import Code
 from openansho.ui.checkable_combo_box import CheckableComboBox
 from openansho.ui.code_filter_input import CodeFilterLineEdit
@@ -44,7 +44,10 @@ from openansho.ui.shortcuts_dialog import ShortcutsDialog
 from openansho.ui.vim_viewer import CodeHighlight, VimTextViewer
 
 PROJECT_FILTER = "OpenAnsho Project (*.sqlite)"
-TEXT_FILTER = "Text Files (*.txt);;All Files (*)"
+TEXT_FILTER = (
+    "Documents (*.txt *.docx);;Text Files (*.txt);;"
+    "Word Documents (*.docx);;All Files (*)"
+)
 CSV_FILTER = "CSV Files (*.csv)"
 JSON_FILTER = "JSON Files (*.json)"
 
@@ -1132,11 +1135,9 @@ class MainWindow(QMainWindow):
         if existing is not None and not overwrite:
             return False
         try:
-            content = path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            QMessageBox.warning(
-                self, "Import Failed", f"Could not read {path.name} as UTF-8 text."
-            )
+            content = text_extract.read_document_text(path)
+        except text_extract.DocumentReadError as exc:
+            QMessageBox.warning(self, "Import Failed", str(exc))
             return False
         if existing is not None:
             db.delete_document(self.conn, existing.id)
