@@ -6,7 +6,7 @@ import sqlite3
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QSettings, Qt
-from PySide6.QtGui import QAction, QColor, QFont, QTextCursor
+from PySide6.QtGui import QAction, QColor, QFont, QKeySequence, QTextCursor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -36,6 +36,15 @@ from openansho.db import Code
 from openansho.ui.checkable_combo_box import CheckableComboBox
 from openansho.ui.code_filter_input import CodeFilterLineEdit
 from openansho.ui.code_tree import CodeTreeWidget
+from openansho.ui.font_scale import (
+    DEFAULT_FONT_SCALE_PERCENT,
+    FONT_SCALE_STEP_PERCENT,
+    MAX_FONT_SCALE_PERCENT,
+    MIN_FONT_SCALE_PERCENT,
+    apply_font_scale,
+    clamp_font_scale,
+    font_scale_style,
+)
 from openansho.ui.merge_codes_dialog import MergeCodesDialog
 from openansho.ui.os_theme import detect_dark_mode
 from openansho.ui.preferences_dialog import PreferencesDialog
@@ -61,6 +70,7 @@ SETTINGS_APPLICATION = "OpenAnsho"
 RECENT_PROJECTS_KEY = "recentProjects"
 MAX_RECENT_PROJECTS = 10
 DARK_MODE_KEY = "darkMode"
+FONT_SCALE_KEY = "fontScalePercent"
 
 BASE_COLOR_CLASSES = [
     "#D81B60",
@@ -232,6 +242,12 @@ class MainWindow(QMainWindow):
             self._dark_mode: bool = self._settings.value(DARK_MODE_KEY, type=bool)
         else:
             self._dark_mode = detect_dark_mode()
+        self._font_scale_percent = clamp_font_scale(
+            self._settings.value(
+                FONT_SCALE_KEY, DEFAULT_FONT_SCALE_PERCENT, type=int
+            )
+        )
+        apply_font_scale(self._font_scale_percent)
 
         self.setWindowTitle("OpenAnsho")
         self.resize(1150, 650)
@@ -564,6 +580,28 @@ class MainWindow(QMainWindow):
         preferences_action.setMenuRole(QAction.MenuRole.NoRole)
         preferences_action.triggered.connect(self._on_show_preferences)
         settings_menu.addAction(preferences_action)
+
+        settings_menu.addSeparator()
+
+        self.font_size_action = QAction(self)
+        self.font_size_action.setEnabled(False)
+        settings_menu.addAction(self.font_size_action)
+
+        self.increase_font_size_action = QAction("&Increase Font Size", self)
+        # Ctrl++ needs Shift on most layouts, so accept the unshifted Ctrl+=
+        # (what users actually press) as an equivalent.
+        self.increase_font_size_action.setShortcuts(
+            [QKeySequence("Ctrl++"), QKeySequence("Ctrl+=")]
+        )
+        self.increase_font_size_action.triggered.connect(self.increase_font_size)
+        settings_menu.addAction(self.increase_font_size_action)
+
+        self.decrease_font_size_action = QAction("&Decrease Font Size", self)
+        self.decrease_font_size_action.setShortcut(QKeySequence("Ctrl+-"))
+        self.decrease_font_size_action.triggered.connect(self.decrease_font_size)
+        settings_menu.addAction(self.decrease_font_size_action)
+
+        self._update_font_size_menu()
 
     # -- Dialog-triggering slots -------------------------------------------
 
@@ -1083,8 +1121,9 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def _on_show_preferences(self) -> None:
-        dialog = PreferencesDialog(self._dark_mode, self)
+        dialog = PreferencesDialog(self._dark_mode, self._font_scale_percent, self)
         dialog.darkModeToggled.connect(self.set_dark_mode)
+        dialog.fontScaleChanged.connect(self.set_font_scale)
         dialog.changeUsernameRequested.connect(self._on_change_username)
         dialog.exec()
 
@@ -1097,8 +1136,38 @@ class MainWindow(QMainWindow):
 
     def _apply_theme(self) -> None:
         theme_style = DARK_THEME_STYLE if self._dark_mode else LIGHT_THEME_STYLE
-        self.setStyleSheet(theme_style + PANE_FOCUS_STYLE)
+        self.setStyleSheet(
+            theme_style + PANE_FOCUS_STYLE + font_scale_style(self._font_scale_percent)
+        )
         self.viewer.set_theme(self._dark_mode)
+
+    @property
+    def font_scale_percent(self) -> int:
+        return self._font_scale_percent
+
+    def set_font_scale(self, percent: int) -> None:
+        """Resize the whole application's font to `percent` of the default."""
+        self._font_scale_percent = clamp_font_scale(percent)
+        self._settings.setValue(FONT_SCALE_KEY, self._font_scale_percent)
+        apply_font_scale(self._font_scale_percent)
+        # The stylesheet carries the size too — see font_scale.font_scale_style.
+        self._apply_theme()
+        self._update_font_size_menu()
+
+    def increase_font_size(self) -> None:
+        self.set_font_scale(self._font_scale_percent + FONT_SCALE_STEP_PERCENT)
+
+    def decrease_font_size(self) -> None:
+        self.set_font_scale(self._font_scale_percent - FONT_SCALE_STEP_PERCENT)
+
+    def _update_font_size_menu(self) -> None:
+        self.font_size_action.setText(f"Font Size: {self._font_scale_percent}%")
+        self.increase_font_size_action.setEnabled(
+            self._font_scale_percent < MAX_FONT_SCALE_PERCENT
+        )
+        self.decrease_font_size_action.setEnabled(
+            self._font_scale_percent > MIN_FONT_SCALE_PERCENT
+        )
 
 
     def create_project(self, path: Path) -> None:

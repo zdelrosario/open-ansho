@@ -222,7 +222,7 @@ def test_change_username_cancel_leaves_username_unchanged(qtbot, monkeypatch):
 def test_preferences_dialog_change_username_button_emits_signal(qtbot):
     from openansho.ui.preferences_dialog import PreferencesDialog
 
-    dialog = PreferencesDialog(dark_mode=False)
+    dialog = PreferencesDialog(dark_mode=False, font_scale_percent=100)
     qtbot.addWidget(dialog)
 
     with qtbot.waitSignal(dialog.changeUsernameRequested, timeout=1000):

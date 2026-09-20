@@ -14,6 +14,8 @@ SHORTCUT_SECTIONS = [
         [
             ("Space", "Jump focus to the code filter"),
             ("Esc", "Return focus to the text pane (from any other pane)"),
+            ("Ctrl++", "Increase the application font size by 25%"),
+            ("Ctrl+-", "Decrease the application font size by 25%"),
         ],
     ),
     (
