@@ -838,10 +838,13 @@ class MainWindow(QMainWindow):
         unparent_action = menu.addAction("Move to Top Level")
         unparent_action.setEnabled(code is not None and code.parent_id is not None)
 
-        color_menu = menu.addMenu("Assign Base Color")
-        color_menu.setEnabled(code is not None and code.parent_id is None)
+        # Child codes take their color from their root ancestor, so the menu is
+        # greyed out and relabelled to say so rather than offering a no-op pick.
+        is_root_code = code is not None and code.parent_id is None
+        color_menu = menu.addMenu("Assign Base Color" if is_root_code else "(Inherits parent color)")
+        color_menu.setEnabled(is_root_code)
         color_actions = {}
-        for color_class in ASSIGNABLE_COLOR_CLASSES:
+        for color_class in ASSIGNABLE_COLOR_CLASSES if is_root_code else ():
             label = BASE_COLOR_CLASS_NAMES.get(color_class, color_class)
             is_current = code is not None and code.color_class == color_class
             action = QWidgetAction(color_menu)
