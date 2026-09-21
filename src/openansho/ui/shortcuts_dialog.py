@@ -65,6 +65,11 @@ SHORTCUT_SECTIONS = [
         "Codebook",
         [
             ("Double-click a code", "Apply it to the text pane's current selection"),
+            (
+                "Right-click",
+                "New child code, rename, edit description, \"Move to Top Level\", "
+                "assign base color, merge, delete",
+            ),
         ],
     ),
 ]
