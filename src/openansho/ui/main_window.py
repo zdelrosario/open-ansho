@@ -835,6 +835,8 @@ class MainWindow(QMainWindow):
         new_child_action = menu.addAction("New Child Code…")
         rename_action = menu.addAction("Rename…")
         edit_description_action = menu.addAction("Edit Description…")
+        unparent_action = menu.addAction("Move to Top Level")
+        unparent_action.setEnabled(code is not None and code.parent_id is not None)
 
         color_menu = menu.addMenu("Assign Base Color")
         color_menu.setEnabled(code is not None and code.parent_id is None)
@@ -861,7 +863,7 @@ class MainWindow(QMainWindow):
         merge_action = menu.addAction("Merge Codes…")
         delete_action = menu.addAction("Delete…")
 
-        chosen = menu.exec(self.code_tree.viewport().mapToGlobal(pos))
+        chosen = self._exec_context_menu(menu, self.code_tree.viewport().mapToGlobal(pos))
         if chosen is None:
             return
         if chosen is new_child_action:
@@ -870,6 +872,8 @@ class MainWindow(QMainWindow):
             self._on_rename_code(code_id, item.text(0))
         elif chosen is edit_description_action:
             self._on_edit_code_description(code_id, code.description if code else None)
+        elif chosen is unparent_action:
+            self.reparent_code(code_id, None)
         elif chosen in color_actions:
             self.set_code_base_color(code_id, color_actions[chosen])
         elif chosen is merge_action:

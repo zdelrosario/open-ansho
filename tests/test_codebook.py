@@ -291,3 +291,57 @@ def test_double_click_segment_selects_document_and_range(qtbot, tmp_path):
     assert window.document_list.currentItem().text() == "b.txt"
     cursor = window.viewer.textCursor()
     assert cursor.selectedText() == "frustrating"
+
+
+def _stub_context_menu_choosing(monkeypatch, label):
+    """PySide6 doesn't let tests monkeypatch QMenu.exec itself (it still runs
+    the real modal loop and hangs headless), so MainWindow exposes
+    `_exec_context_menu` as the seam to stub instead."""
+    captured = {}
+
+    def fake_exec(_self, menu, _global_pos):
+        captured["actions"] = {action.text(): action for action in menu.actions()}
+        chosen = captured["actions"].get(label)
+        # Qt never hands back a disabled action, so neither does the stub.
+        return chosen if chosen is not None and chosen.isEnabled() else None
+
+    monkeypatch.setattr(MainWindow, "_exec_context_menu", fake_exec)
+    return captured
+
+
+def _item_center(tree, item):
+    return tree.visualItemRect(item).center()
+
+
+def test_code_context_menu_moves_a_child_code_to_the_top_level(qtbot, tmp_path, monkeypatch):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.create_project(tmp_path / "project.sqlite")
+
+    parent = window.add_code("Emotions")
+    child = window.add_code("Frustration", parent_id=parent.id)
+    child_item = window.code_tree.topLevelItem(0).child(0)
+
+    _stub_context_menu_choosing(monkeypatch, "Move to Top Level")
+    window._on_code_context_menu(_item_center(window.code_tree, child_item))
+
+    assert db.get_code(window.conn, child.id).parent_id is None
+    top_level_names = {
+        window.code_tree.topLevelItem(i).text(0)
+        for i in range(window.code_tree.topLevelItemCount())
+    }
+    assert top_level_names == {"Emotions", "Frustration"}
+
+
+def test_code_context_menu_disables_move_to_top_level_for_a_root_code(qtbot, tmp_path, monkeypatch):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.create_project(tmp_path / "project.sqlite")
+
+    window.add_code("Emotions")
+    root_item = window.code_tree.topLevelItem(0)
+
+    captured = _stub_context_menu_choosing(monkeypatch, "Move to Top Level")
+    window._on_code_context_menu(_item_center(window.code_tree, root_item))
+
+    assert not captured["actions"]["Move to Top Level"].isEnabled()
