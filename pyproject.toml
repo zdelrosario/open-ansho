@@ -1,17 +1,52 @@
 [build-system]
-requires = ["hatchling"]
+# 1.27 is the first hatchling that understands PEP 639 (`license`/`license-files`).
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
 name = "openansho"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Open-source qualitative data analysis"
 readme = "README.md"
-license = { file = "LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.9"
+authors = [{ name = "Zachary del Rosario", email = "zdelrosario@olin.edu" }]
+keywords = [
+    "qualitative-data-analysis",
+    "qda",
+    "coding",
+    "codebook",
+    "research",
+    "vim",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: MacOS X",
+    "Environment :: Win32 (MS Windows)",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: Education",
+    "Intended Audience :: Science/Research",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+    "Topic :: Text Processing :: Linguistic",
+]
 dependencies = [
     "PySide6>=6.6",
 ]
+
+[project.urls]
+Homepage = "https://github.com/zdelrosario/open-ansho"
+Repository = "https://github.com/zdelrosario/open-ansho"
+Issues = "https://github.com/zdelrosario/open-ansho/issues"
 
 [project.optional-dependencies]
 dev = [
@@ -22,12 +57,41 @@ build = [
     "pyinstaller>=6.0",
     "pillow",
 ]
+# Building and uploading the sdist/wheel to PyPI (see `make dist` / `make publish`).
+publish = [
+    "build>=1.2",
+    "twine>=6.1",
+]
 
-[project.scripts]
+# A gui-script rather than a console script: on Windows the launcher is built
+# against pythonw, so double-clicking or running `openansho` doesn't leave a
+# console window sitting behind the app. On macOS/Linux the two kinds of entry
+# point are identical. `python -m openansho` still runs it with a console
+# attached, which is the way to see a traceback on Windows.
+[project.gui-scripts]
 openansho = "openansho.__main__:main"
+
+[tool.hatch.version]
+path = "src/openansho/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/openansho"]
+
+# The app icon lives at the repo root for PyInstaller's sake (see the Makefile),
+# but an installed copy has no repo around it — so ship the icon inside the
+# package too, where `__main__._icon_path` looks for it.
+[tool.hatch.build.targets.wheel.force-include]
+"images/kanji_shou_app_icon.png" = "openansho/kanji_shou_app_icon.png"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/tests",
+    "/images",
+    "/Makefile",
+    "/README.md",
+    "/CLAUDE.md",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

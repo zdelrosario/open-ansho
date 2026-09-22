@@ -52,6 +52,26 @@ The binary inside the archive is already marked executable, so no `chmod` is nee
 
 The Linux build is produced on the current Ubuntu CI image, so it needs a reasonably recent glibc and will not run on notably older distributions. It also unpacks itself into `/tmp` at startup, which fails on systems that mount `/tmp` with `noexec`; setting `TMPDIR` to a directory that permits execution works around that.
 
+## Install with pip
+
+If you already have Python 3.9 or newer, OpenAnsho is also on PyPI:
+
+```bash
+pip install openansho
+```
+
+Then start it from a terminal:
+
+```bash
+openansho
+```
+
+`pipx install openansho` works too, and is the better choice if you would rather not add OpenAnsho (and Qt, which comes with it) to an existing environment — pipx keeps it in its own virtualenv while still putting the `openansho` command on your PATH.
+
+The pip install pulls in PySide6, which ships Qt itself; on a minimal Linux install you may still need a few system libraries (`libegl1`, `libgl1`, `libxkbcommon0`, `libxcb-cursor0` on Debian/Ubuntu). Unlike the prebuilt executables above, a pip install stores your username in a per-user config directory (`~/Library/Application Support/OpenAnsho` on macOS, `%APPDATA%\OpenAnsho` on Windows, `~/.config/openansho` on Linux), so it survives upgrading the package.
+
+If the app fails to start and you want to see why, run `python -m openansho` instead — that form keeps a console attached on Windows and prints the traceback.
+
 ## Development Setup
 
 First-time setup, run once from the repo root:

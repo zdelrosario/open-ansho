@@ -1,0 +1,90 @@
+# Publishes the sdist and wheel to PyPI when a version tag is pushed.
+#
+# Uploading uses PyPI trusted publishing rather than a stored API token: the
+# `id-token: write` permission lets the job mint a short-lived OIDC credential
+# that PyPI exchanges for an upload token, so there is no secret to rotate. This
+# requires a one-time setup on PyPI — under the project's Publishing settings,
+# add a GitHub publisher for repository `zdelrosario/open-ansho`, workflow
+# `release.yml`, environment `pypi`. For the very first release (before the
+# project exists on PyPI) add the same as a *pending* publisher on your account.
+#
+# To cut a release: bump `__version__` in src/openansho/__init__.py, commit, then
+#   git tag v0.1.0 && git push origin v0.1.0
+# The tag has to match the package version — the build job checks and fails loudly
+# if it doesn't, since PyPI will not let a version be re-uploaded once taken.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Qt runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libxkbcommon0 libxcb-cursor0
+
+      - name: Run tests
+        run: make test
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install --upgrade build twine
+          python -m build --outdir dist/pypi
+          python -m twine check --strict dist/pypi/*
+
+      - name: Check the tag matches the package version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME#v}"
+          VERSION=$(python -c "import re,pathlib; print(re.search(r'\"(.+?)\"', pathlib.Path('src/openansho/__init__.py').read_text()).group(1))")
+          if [ "$TAG" != "$VERSION" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match __version__ $VERSION" >&2
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pypi-distribution
+          path: dist/pypi
+
+  publish:
+    needs: build
+    # Only a tag push publishes; a manual run stops after building, which is a
+    # cheap way to check the artifacts without spending a version number.
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/openansho
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: pypi-distribution
+          path: dist
+
+      - uses: pypa/gh-action-pypi-publish@release/v1

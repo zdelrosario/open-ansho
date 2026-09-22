@@ -16,5 +16,8 @@ from openansho import user
 def _isolate_username_file(tmp_path, monkeypatch):
     """The real .openansho_user sidecar lives next to the installed app, one
     per machine — redirect it into each test's own tmp_path so tests never
-    read or clobber the developer's actual username file on disk."""
+    read or clobber the developer's actual username file on disk. The
+    site-packages branch is pinned off as well, so a test run against an
+    installed copy of the package stays inside tmp_path too."""
     monkeypatch.setattr(user, "application_directory", lambda: tmp_path)
+    monkeypatch.setattr(user, "installed_in_site_packages", lambda: False)

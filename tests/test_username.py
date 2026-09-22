@@ -1,3 +1,6 @@
+import sysconfig
+from pathlib import Path
+
 from openansho import db, user
 from openansho.ui.main_window import NO_USERNAME_TEXT, MainWindow
 
@@ -227,3 +230,34 @@ def test_preferences_dialog_change_username_button_emits_signal(qtbot):
 
     with qtbot.waitSignal(dialog.changeUsernameRequested, timeout=1000):
         dialog.change_username_button.click()
+
+
+def test_installed_copy_stores_the_username_in_the_config_directory(tmp_path, monkeypatch):
+    """A pip-installed copy must not write into site-packages, which can be
+    read-only and is replaced wholesale on upgrade."""
+    monkeypatch.setattr(user, "installed_in_site_packages", lambda: True)
+    monkeypatch.setattr(user, "config_directory", lambda: tmp_path / "config")
+
+    user.write_username("alice")
+
+    assert (tmp_path / "config" / ".openansho_user").read_text() == "alice"
+    assert user.read_username() == "alice"
+    assert not (user.application_directory() / ".openansho_user").exists()
+
+
+def test_library_path_detection_distinguishes_an_install_from_a_checkout():
+    site_packages = Path(sysconfig.get_paths()["purelib"]).resolve()
+
+    assert user._is_library_path(site_packages / "openansho") is True
+    assert user._is_library_path(Path(__file__).resolve().parent) is False
+
+
+def test_config_directory_follows_the_platform_convention(monkeypatch):
+    monkeypatch.setattr(user.sys, "platform", "linux")
+    monkeypatch.setenv("XDG_CONFIG_HOME", "/tmp/xdg")
+
+    assert user.config_directory() == Path("/tmp/xdg/openansho")
+
+    monkeypatch.setattr(user.sys, "platform", "darwin")
+
+    assert user.config_directory() == Path.home() / "Library" / "Application Support" / "OpenAnsho"

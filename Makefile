@@ -31,7 +31,9 @@ PIP := $(VENV_BIN)/pip
 PYINSTALLER := $(VENV_BIN)/pyinstaller
 PYTEST := $(VENV_BIN)/pytest
 
-.PHONY: help venv install install-build test clean build build-mac build-windows build-linux
+PYPI_DIR := $(DIST_DIR)/pypi
+
+.PHONY: help venv install install-build install-publish test clean build build-mac build-windows build-linux dist publish publish-test
 
 help:
 	@echo "Targets:"
@@ -43,6 +45,9 @@ help:
 	@echo "  build-windows  Build a Windows .exe (must run on Windows)"
 	@echo "  build-linux    Build a Linux binary (must run on Linux)"
 	@echo "  build          Build for the current platform"
+	@echo "  dist           Build the PyPI sdist + wheel into $(PYPI_DIR)"
+	@echo "  publish-test   Upload the sdist + wheel to TestPyPI"
+	@echo "  publish        Upload the sdist + wheel to PyPI"
 	@echo "  clean          Remove build/dist artifacts and .spec files"
 
 $(VENV_BIN)/python:
@@ -55,6 +60,9 @@ install: venv
 
 install-build: venv
 	$(PIP) install -e ".[build]"
+
+install-publish: venv
+	$(PIP) install -e ".[publish]"
 
 # Note: the full suite is known to hang in Claude Code's sandboxed/offscreen
 # environment (see CLAUDE.md) — this target is meant for a real terminal or CI.
@@ -128,6 +136,29 @@ build-linux: install-build
 	tar -czf $(DIST_DIR)/linux/$(APP_NAME)-linux.tar.gz \
 		-C $(DIST_DIR)/linux $(APP_NAME)
 	rm $(DIST_DIR)/linux/$(APP_NAME)
+
+# --- PyPI distribution ------------------------------------------------------
+#
+# Unlike the PyInstaller builds above, the sdist and wheel are pure Python and
+# platform-independent, so one machine (or one CI job) produces the artifacts
+# everyone installs; PySide6 is left to pip to resolve per platform. The wheel
+# is built from the sdist so that anything missing from the sdist shows up here
+# rather than in a user's failed `pip install`.
+#
+# The release workflow (.github/workflows/release.yml) runs the same two steps
+# on a version tag and uploads via PyPI trusted publishing, so `make publish` is
+# only needed for a manual release — it prompts for a PyPI API token.
+
+dist: install-publish
+	rm -rf $(PYPI_DIR)
+	$(PYTHON) -m build --outdir $(PYPI_DIR)
+	$(VENV_BIN)/twine check --strict $(PYPI_DIR)/*
+
+publish-test: dist
+	$(VENV_BIN)/twine upload --repository testpypi $(PYPI_DIR)/*
+
+publish: dist
+	$(VENV_BIN)/twine upload $(PYPI_DIR)/*
 
 # Convenience: build for whatever OS `make` is currently running on.
 UNAME_S := $(shell uname -s 2>/dev/null)

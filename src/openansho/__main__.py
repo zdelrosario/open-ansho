@@ -7,14 +7,21 @@ from PySide6.QtWidgets import QApplication
 from openansho.ui.main_window import MainWindow
 
 
+ICON_FILENAME = "kanji_shou_app_icon.png"
+
+
 def _icon_path() -> Path:
-    # PyInstaller extracts bundled data files (see the Makefile's --add-data)
-    # under sys._MEIPASS at runtime; fall back to the repo layout when running
-    # from source.
+    # Three layouts to cover: PyInstaller extracts bundled data files (see the
+    # Makefile's --add-data) under sys._MEIPASS; an installed wheel carries the
+    # icon inside the package (see pyproject's force-include); a source checkout
+    # has it at the repo root, which is where the Makefile reads it from.
     meipass = getattr(sys, "_MEIPASS", None)
     if meipass:
-        return Path(meipass) / "images" / "kanji_shou_app_icon.png"
-    return Path(__file__).resolve().parent.parent.parent / "images" / "kanji_shou_app_icon.png"
+        return Path(meipass) / "images" / ICON_FILENAME
+    packaged = Path(__file__).resolve().parent / ICON_FILENAME
+    if packaged.exists():
+        return packaged
+    return Path(__file__).resolve().parent.parent.parent / "images" / ICON_FILENAME
 
 
 def main() -> None:

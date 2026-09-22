@@ -38,11 +38,26 @@ pip install -e ".[dev]"        # install package + dev deps (pytest, pytest-qt)
 python -m openansho             # run the app (or the `openansho` console script)
 pytest                          # run the full test suite
 pytest tests/test_db.py::test_create_code_and_list_codes   # run a single test
+make dist                       # build the PyPI sdist + wheel into dist/pypi
 ```
 
 There is no configured linter/formatter/type-checker in `pyproject.toml` — don't assume `ruff`/`black`/`mypy` are wired in.
 
 **Known hang: the full suite in Claude Code's sandbox.** Running the unscoped suite (bare `pytest`, or `pytest tests/`) reliably hangs in Claude Code's sandboxed/offscreen environment — the process gets stuck in an uninterruptible sleep that not even `kill -9` can clear, apparently a Qt/native-windowing issue with `tests/test_always_selected_code.py` specifically when it runs alongside the rest of the suite (it passes in well under a second in isolation, e.g. `pytest tests/test_always_selected_code.py`). `pytest tests/ --ignore=tests/test_always_selected_code.py` runs the rest of the suite (142 tests) in about a second. Claude Code should scope test runs (a single file, `--ignore` that file, or `-k`) rather than invoking the bare full suite. The human developer should still run the full suite occasionally outside this sandbox (a normal local terminal), since that's the only way to catch a regression in the one file this workaround always excludes.
+
+## Distribution
+
+The app ships through two channels, and a change to how the app finds its files has to work in both:
+
+- **Prebuilt executables** via PyInstaller (`make build-mac`/`build-windows`/`build-linux`, published to the `builds` branch by `.github/workflows/ci.yml`).
+- **A PyPI sdist + wheel** (`make dist`, published by `.github/workflows/release.yml` on a `v*` tag via trusted publishing; `make publish` is the manual fallback). Releasing means bumping `__version__` in `src/openansho/__init__.py` — hatchling reads the version from there, so `pyproject.toml` has none of its own — then pushing a matching tag, which the workflow verifies against `__version__` before uploading.
+
+Consequences worth knowing before touching the packaging:
+
+- **`__main__._icon_path` has three branches** because the icon lives in a different place in each layout: `sys._MEIPASS/images/` in a PyInstaller bundle, next to the package in an installed wheel (pyproject `force-include`s `images/kanji_shou_app_icon.png` into `openansho/`, since a wheel has no repo root), and `images/` at the repo root when running from source. Package data added in the future needs the same treatment — `tutorial.txt` avoids it by living inside the package to begin with, which is the simpler option.
+- **`user.username_file` picks a directory based on how the app was installed.** Frozen builds and source checkouts own their directory, so the `.openansho_user` sidecar sits next to the app as before; a pip install would otherwise write into site-packages, which can be read-only and is replaced wholesale on upgrade, so `user.installed_in_site_packages()` routes it to `user.config_directory()` instead.
+- **The entry point is a `gui-script`, not a `console script`**, so the Windows launcher is built against `pythonw` and doesn't leave a console window behind the app. `python -m openansho` is the console-attached form to recommend when someone needs a traceback.
+- `tests/test_packaging.py` covers the layout-dependent paths; `tests/conftest.py` pins `installed_in_site_packages` off so the suite never touches a real config directory.
 
 ## Architecture
 
