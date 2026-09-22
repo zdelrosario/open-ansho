@@ -9,6 +9,8 @@ Open Ansho is a free and open-source desktop app for qualitative data analysis o
 
 Documents can be imported as plain text (`.txt`) or Microsoft Word (`.docx`) files; Word documents are converted to plain text on import, one line per paragraph.
 
+The app opens on a built-in tutorial that walks you through coding your first document, so there is nothing to set up before trying it. The tutorial is a scratch project held in memory — code it up however you like, then use File > New Project when you're ready to work on your own data. Nothing from the tutorial is saved, so it starts fresh every time you open the app (File > Open Tutorial brings it back mid-session).
+
 This software was created using Claude Code.
 
 ## Download and Run

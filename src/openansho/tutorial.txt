@@ -1,0 +1,31 @@
+Welcome to Open Ansho! Please open or start a new project, OR follow this tutorial to get started.
+
+
+
+(First, try selecting this sentence using your mouse.) Then click the text field under the Codebook; this should say "Filter codes, or type a new name...". Once you've clicked in this field, type the word "instructions", then press your Enter key.
+
+This does a couple things:
+
+- You've just added a new [code]. The [instructions] code now appears in the codebook, along with a count of the number of times the code appears in the currently selected text.
+- You've applied the code to a (segment). We use codes to categorize and describe (segments) of text data. Open Ansho makes it easy to organize codes and apply them to text data.
+
+Next, let's add another [code] and learn some shortcuts. (Select this sentence, and press the Spacebar.) This will move focus to the text field, and you can immediately start typing the name of a code. Type the string "ins"---note, not the complete word "instructions"---and press Enter. Notice that this applies the existing code [instructions]. You can use the text field to specify a new code, OR filter down to existing codes.
+
+Ok, let's create a new code. (Select this segment), and code it as [selection]. Once you've added the new code [selection], click on the code in the Codebook pane, and drag it on top of the existing [instructions] code. You should see that the [selection] code changes color to match the [instructions] code, and it is now listed "under" the [instructions] code. The [selection] code is now a child of the [instructions] code. Organizing parent and child codes helps us organize our codebook.
+
+Let's practice organizing a codebook. Try to make the following codebook, noting that indented codes are child codes of the unindented code above them. Note that you can use Spacebar to switch to the code text field, even if you don't have any (segments) selected. See if you can make the following Codebook without applying the new codes to any (segments).
+
+[explanations]
+  [general]
+  [shortcuts]
+[instructions]
+  [selection]
+  [action]
+
+Note that new codes are automatically assigned a color, and child codes are a lighter version of their parent's color. You can change the color of a parent code by right-clicking it and using the "Assign Base Color" menu.
+
+This is the core functionality of Open Ansho. Here are a few more tips to help you get started:
+
+To do your own data analysis, you should use the File > New Project option to start a new project. With your project open, you can use File > Import Document... to add text data to your project. With multiple files imported, you can use the file panel on the left to select which document to code. If you don't see any text in the middle pane, make sure you have a document selected in the left pane.
+
+Open Ansho has a variety of keyboard shortcuts to help you code more effectively. Try pressing the ? key on your keyboard to show the full list of shortcuts.

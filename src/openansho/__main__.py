@@ -21,6 +21,9 @@ def main() -> None:
     app = QApplication(sys.argv)
     app.setWindowIcon(QIcon(str(_icon_path())))
     window = MainWindow()
+    # Start in the built-in tutorial so the app opens onto something codeable;
+    # it's an in-memory project, so it costs the user nothing to abandon.
+    window.open_tutorial_project()
     window.show()
     sys.exit(app.exec())
 

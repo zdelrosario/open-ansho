@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
     QWidgetAction,
 )
 
-from openansho import db, reporting, text_extract, user
+from openansho import db, reporting, text_extract, tutorial, user
 from openansho.db import Code
 from openansho.ui.checkable_combo_box import CheckableComboBox
 from openansho.ui.code_filter_input import CodeFilterLineEdit
@@ -62,6 +62,9 @@ JSON_FILTER = "JSON Files (*.json)"
 
 PROJECT_SECTION_LABEL_OPEN = "Project"
 PROJECT_SECTION_LABEL_CLOSED = "Project (first open a project)"
+
+TUTORIAL_PROJECT_NAME = "Tutorial"
+TUTORIAL_STATUS_MESSAGE = "Tutorial project — nothing you do here is saved"
 
 NO_USERNAME_TEXT = "(NO USERNAME)"
 
@@ -502,6 +505,10 @@ class MainWindow(QMainWindow):
         self.recent_projects_menu = QMenu("Open &Recent", self)
         file_menu.addMenu(self.recent_projects_menu)
         self._refresh_recent_projects_menu()
+
+        self.open_tutorial_action = QAction("Open &Tutorial", self)
+        self.open_tutorial_action.triggered.connect(self.open_tutorial_project)
+        file_menu.addAction(self.open_tutorial_action)
 
         file_menu.addSeparator()
 
@@ -1185,6 +1192,18 @@ class MainWindow(QMainWindow):
     def open_project(self, path: Path) -> None:
         self._set_connection(db.connect(path), path)
 
+    def open_tutorial_project(self) -> None:
+        """Open the built-in tutorial and select its document.
+
+        The project is in-memory (see `tutorial.open_tutorial_project`), so
+        the codes the user creates while working through it are thrown away
+        when the app closes and the tutorial starts over on the next launch.
+        """
+        self._set_connection(tutorial.open_tutorial_project(), None)
+        documents = db.list_documents(self.conn)
+        if documents:
+            self._select_document(documents[0].id)
+
     def close_project(self) -> None:
         if self.conn is None:
             return
@@ -1505,7 +1524,13 @@ class MainWindow(QMainWindow):
         earlier = [s for s in segments if s.start_offset < position]
         return earlier[-1] if earlier else segments[-1]
 
-    def _set_connection(self, conn: sqlite3.Connection, path: Path) -> None:
+    def _set_connection(self, conn: sqlite3.Connection, path: Path | None) -> None:
+        """Adopt `conn` as the open project.
+
+        `path` is None for the built-in tutorial project, which lives only in
+        memory: it has no file to name the window after, and nothing to
+        reopen later, so it stays out of the recent-projects list.
+        """
         if self.conn is not None:
             self.conn.close()
         self.conn = conn
@@ -1514,13 +1539,17 @@ class MainWindow(QMainWindow):
         self._update_username_label()
         self._current_document_id = None
         self._user_filter_overrides = {}
-        self.setWindowTitle(f"OpenAnsho — {path.name}")
-        self.statusBar().showMessage(str(path))
+        name = path.name if path is not None else TUTORIAL_PROJECT_NAME
+        self.setWindowTitle(f"OpenAnsho — {name}")
+        self.statusBar().showMessage(
+            str(path) if path is not None else TUTORIAL_STATUS_MESSAGE
+        )
         self._refresh_documents()
         self._refresh_user_filter()
         self._refresh_codes()
         self._update_actions_enabled()
-        self._add_recent_project(path)
+        if path is not None:
+            self._add_recent_project(path)
 
     def _recent_projects(self) -> list[Path]:
         raw = self._settings.value(RECENT_PROJECTS_KEY, [])
