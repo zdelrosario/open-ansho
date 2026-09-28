@@ -4,10 +4,11 @@ Welcome to Open Ansho! Please open or start a new project, OR follow this tutori
 
 (First, try selecting this sentence using your mouse.) Then click the text field under the Codebook; this should say "Filter codes, or type a new name...". Once you've clicked in this field, type the word "instructions", then press your Enter key.
 
-This does a couple things:
+This does a few things:
 
 - You've just added a new [code]. The [instructions] code now appears in the codebook, along with a count of the number of times the code appears in the currently selected text.
 - You've applied the code to a (segment). We use codes to categorize and describe (segments) of text data. Open Ansho makes it easy to organize codes and apply them to text data.
+- There's no need to save: Both the codebook and code segments are automatically and immediately saved in your project.
 
 Next, let's add another [code] and learn some shortcuts. (Select this sentence, and press the Spacebar.) This will move focus to the text field, and you can immediately start typing the name of a code. Type the string "ins"---note, not the complete word "instructions"---and press Enter. Notice that this applies the existing code [instructions]. You can use the text field to specify a new code, OR filter down to existing codes.
 
