@@ -2,7 +2,9 @@
 
 Like `db.py` and `reporting.py`, this module has no Qt imports: the UI hands it
 a path and gets back a string (or a `DocumentReadError` carrying a message fit
-for a dialog).
+for a dialog). PDFs are the one extension that can't be read without Qt's PDF
+engine, so `openansho.pdf_extract` is imported lazily inside that branch —
+importing this module still costs nothing for the text and `.docx` paths.
 
 The `.docx` reader is hand-rolled on top of `zipfile`/`xml.etree` rather than
 `python-docx` so the packaged app keeps its single third-party dependency.
@@ -27,6 +29,10 @@ def read_document_text(path: Path) -> str:
     suffix = path.suffix.lower()
     if suffix == ".docx":
         return read_docx_text(path)
+    if suffix == ".pdf":
+        from openansho import pdf_extract  # local: only this branch needs Qt
+
+        return pdf_extract.read_pdf_text(path)
     if suffix == ".doc":
         raise DocumentReadError(
             f"{path.name} is a legacy Word document. Open it in Word and save it "

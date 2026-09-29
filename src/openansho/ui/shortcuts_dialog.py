@@ -5,7 +5,9 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QLabel,
+    QScrollArea,
     QVBoxLayout,
+    QWidget,
 )
 
 SHORTCUT_SECTIONS = [
@@ -62,6 +64,20 @@ SHORTCUT_SECTIONS = [
         ],
     ),
     (
+        "PDF page pane",
+        [
+            ("Drag", "Draw a rectangular region on the page and select it for coding"),
+            ("Click a region", "Select it in the text pane, ready for a code"),
+            ("Right-click a region", "Remove one of its codes, or delete the region"),
+            ("‹ / ›", "Turn to the previous / next page"),
+            (
+                "▭",
+                "Each region's marker in the text pane — one character, so the "
+                "vim motions and coding shortcuts treat it like any other",
+            ),
+        ],
+    ),
+    (
         "Codebook",
         [
             ("Double-click a code", "Apply it to the text pane's current selection"),
@@ -79,18 +95,30 @@ class ShortcutsDialog(QDialog):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Keyboard Shortcuts")
-        self.resize(420, 480)
+        self.resize(520, 560)
 
-        layout = QVBoxLayout(self)
+        # The sections scroll rather than sizing the dialog to all of them:
+        # laid out in full they are taller than a 1080p screen, and the list
+        # only grows as shortcuts are added.
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
 
         for title, shortcuts in SHORTCUT_SECTIONS:
             heading = QLabel(f"<b>{title}</b>")
-            layout.addWidget(heading)
+            content_layout.addWidget(heading)
             for keys, description in shortcuts:
                 row = QLabel(f"<tt>{keys}</tt> — {description}")
                 row.setTextFormat(Qt.RichText)
-                layout.addWidget(row)
-            layout.addSpacing(8)
+                row.setWordWrap(True)
+                content_layout.addWidget(row)
+            content_layout.addSpacing(8)
+
+        scroll = QScrollArea()
+        scroll.setWidget(content)
+        scroll.setWidgetResizable(True)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(scroll, 1)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Close)
         buttons.rejected.connect(self.reject)

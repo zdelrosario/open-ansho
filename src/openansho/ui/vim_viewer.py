@@ -3,9 +3,11 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from PySide6.QtCore import QPointF, QRect, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPen, QPolygonF, QTextCharFormat, QTextCursor
+from PySide6.QtCore import QRect, QRectF, Qt, Signal
+from PySide6.QtGui import QColor, QPainter, QPen, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import QPlainTextEdit, QTextEdit
+
+from openansho.ui.highlight_paint import paint_diagonal_stripes
 
 STRIPE_WIDTH_IN_CHARS = 2
 
@@ -149,6 +151,40 @@ class VimTextViewer(QPlainTextEdit):
             super().clear()
         finally:
             self._suspend_edit_tracking = False
+
+    def replace_text(self, position: int, length: int, text: str) -> None:
+        """Splice `text` in over `length` characters at `position`.
+
+        Not reported through `contentEdited`, unlike a user's insert-mode
+        edit: this is for edits the caller is reconciling the database
+        against itself with offsets it already knows (the PDF region
+        markers in `MainWindow.create_region`/`delete_region`). Editing in
+        place rather than reloading the whole document keeps the viewer's
+        scroll position.
+        """
+        cursor = QTextCursor(self.document())
+        cursor.setPosition(position)
+        if length:
+            cursor.setPosition(position + length, QTextCursor.KeepAnchor)
+        self._suspend_edit_tracking = True
+        try:
+            cursor.insertText(text)  # replaces the selection, if any
+        finally:
+            self._suspend_edit_tracking = False
+
+    def select_range(self, start: int, end: int) -> None:
+        """Select [start, end) and enter visual mode.
+
+        Leaves the viewer exactly as if the user had made the selection with
+        `v`, so the ordinary coding shortcuts (Enter, the code filter, the
+        Apply button) act on it.
+        """
+        self._enter_visual_mode()
+        cursor = self.textCursor()
+        cursor.setPosition(start)
+        cursor.setPosition(end, QTextCursor.KeepAnchor)
+        self.setTextCursor(cursor)
+        self.ensureCursorVisible()
 
     def _on_contents_change(self, position: int, chars_removed: int, chars_added: int) -> None:
         if self._suspend_edit_tracking:
@@ -760,33 +796,13 @@ class VimTextViewer(QPlainTextEdit):
     def _paint_diagonal_stripes(
         self, painter: QPainter, rect: QRectF, colors: tuple[QColor, ...]
     ) -> None:
-        """Fill `rect` with alternating diagonal (bottom-left to top-right)
-        stripes cycling through `colors`, each roughly two characters wide,
-        so a span coded with multiple codes shows every color at once
-        instead of only the last one painted over the rest."""
-        stripe_width = max(self.fontMetrics().averageCharWidth() * STRIPE_WIDTH_IN_CHARS, 1)
-        shear = rect.height()
-
-        painter.save()
-        painter.setClipRect(rect, Qt.IntersectClip)
-        painter.setPen(Qt.NoPen)
-        x = rect.left() - shear
-        index = 0
-        while x < rect.right() + shear:
-            painter.setBrush(colors[index % len(colors)])
-            painter.drawPolygon(
-                QPolygonF(
-                    [
-                        QPointF(x, rect.bottom()),
-                        QPointF(x + shear, rect.top()),
-                        QPointF(x + shear + stripe_width, rect.top()),
-                        QPointF(x + stripe_width, rect.bottom()),
-                    ]
-                )
-            )
-            x += stripe_width
-            index += 1
-        painter.restore()
+        """Stripe `rect` through `colors`, each stripe roughly two characters wide."""
+        paint_diagonal_stripes(
+            painter,
+            rect,
+            colors,
+            self.fontMetrics().averageCharWidth() * STRIPE_WIDTH_IN_CHARS,
+        )
 
     def _line_rects_for_range(self, start: int, end: int) -> list[QRect]:
         """Viewport rects covering [start, end), one per visual line it spans.

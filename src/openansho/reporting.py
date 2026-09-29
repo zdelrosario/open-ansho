@@ -35,12 +35,38 @@ def code_path(codes_by_id: dict[int, Code], code_id: int) -> str:
     return " > ".join(reversed(parts))
 
 
+def segment_text(
+    document: db.Document, segment: db.Segment, regions_by_offset: dict[int, db.Region]
+) -> str:
+    """The coded text of one segment, as an export should show it.
+
+    A coded region of a PDF page is one marker character in the document's
+    text (see `pdf_extract`), which would export as an inscrutable ▭ — so
+    every marker inside the span is replaced by a description of the region
+    it stands for instead.
+    """
+    text = document.content[segment.start_offset : segment.end_offset]
+    if not regions_by_offset:
+        return text
+    pieces = []
+    for offset, character in enumerate(text, start=segment.start_offset):
+        region = regions_by_offset.get(offset)
+        pieces.append(
+            f"[image region, page {region.page + 1}]" if region is not None else character
+        )
+    return "".join(pieces)
+
+
 def _segment_rows(conn: sqlite3.Connection) -> list[dict]:
     codes_by_id = {code.id: code for code in db.list_codes(conn)}
     documents = db.list_documents(conn)
 
     rows = []
     for document in documents:
+        regions_by_offset = {
+            region.text_offset: region
+            for region in db.list_regions_for_document(conn, document.id)
+        }
         for segment in db.list_segments_for_document(conn, document.id):
             rows.append(
                 {
@@ -48,7 +74,7 @@ def _segment_rows(conn: sqlite3.Connection) -> list[dict]:
                     "code": code_path(codes_by_id, segment.code_id),
                     "start_offset": segment.start_offset,
                     "end_offset": segment.end_offset,
-                    "text": document.content[segment.start_offset : segment.end_offset],
+                    "text": segment_text(document, segment, regions_by_offset),
                     "memo": segment.memo or "",
                     "username": segment.created_by or "",
                     "created_at": segment.created_at,

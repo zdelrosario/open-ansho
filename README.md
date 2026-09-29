@@ -7,7 +7,9 @@ Open Ansho is a free and open-source desktop app for qualitative data analysis o
 - Clarity: Visually compare overlapping code segments through vertically-separated split highlights. Easily see simultaneous coding through striped segments.
 - Lightweight: No bloat. Just fast coding.
 
-Documents can be imported as plain text (`.txt`) or Microsoft Word (`.docx`) files; Word documents are converted to plain text on import, one line per paragraph.
+Documents can be imported as plain text (`.txt`), Microsoft Word (`.docx`), or PDF (`.pdf`) files; Word documents are converted to plain text on import, one line per paragraph.
+
+A PDF's text is extracted and coded exactly like any other document, with a page pane beside the text showing the page you are reading. Drag out a rectangle on that page to mark a figure, photo, or any other non-text area, then code it with the same keys you code text with — it can carry several codes at once, just like a span of text. Each marked region shows up in the text as a single `▭` character, so the Vim motions step over an image in one keystroke.
 
 The app opens on a built-in tutorial that walks you through coding your first document, so there is nothing to set up before trying it. The tutorial is a scratch project held in memory — code it up however you like, then use File > New Project when you're ready to work on your own data. Nothing from the tutorial is saved, so it starts fresh every time you open the app (File > Open Tutorial brings it back mid-session).
 

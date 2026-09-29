@@ -5,7 +5,7 @@ import random
 import sqlite3
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QSettings, Qt
+from PySide6.QtCore import QEvent, QRectF, QSettings, Qt
 from PySide6.QtGui import QAction, QColor, QFont, QKeySequence, QTextCursor
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
     QWidgetAction,
 )
 
-from openansho import db, reporting, text_extract, tutorial, user
+from openansho import db, pdf_extract, reporting, text_extract, tutorial, user
 from openansho.db import Code
 from openansho.ui.checkable_combo_box import CheckableComboBox
 from openansho.ui.code_filter_input import CodeFilterLineEdit
@@ -47,6 +47,7 @@ from openansho.ui.font_scale import (
 )
 from openansho.ui.merge_codes_dialog import MergeCodesDialog
 from openansho.ui.os_theme import detect_dark_mode
+from openansho.ui.pdf_page_view import PdfPageView, RegionMark
 from openansho.ui.preferences_dialog import PreferencesDialog
 from openansho.ui.report_dialog import CodeFrequencyDialog, CodeUserFrequencyDialog
 from openansho.ui.shortcuts_dialog import ShortcutsDialog
@@ -54,8 +55,8 @@ from openansho.ui.vim_viewer import CodeHighlight, VimTextViewer
 
 PROJECT_FILTER = "OpenAnsho Project (*.sqlite)"
 TEXT_FILTER = (
-    "Documents (*.txt *.docx);;Text Files (*.txt);;"
-    "Word Documents (*.docx);;All Files (*)"
+    "Documents (*.txt *.docx *.pdf);;Text Files (*.txt);;"
+    "Word Documents (*.docx);;PDF Files (*.pdf);;All Files (*)"
 )
 CSV_FILTER = "CSV Files (*.csv)"
 JSON_FILTER = "JSON Files (*.json)"
@@ -269,6 +270,19 @@ class MainWindow(QMainWindow):
         self.viewer.setContextMenuPolicy(Qt.CustomContextMenu)
         self.viewer.customContextMenuRequested.connect(self._on_viewer_context_menu)
 
+        # Shown beside the text pane only while a PDF document is open.
+        self.pdf_view = PdfPageView()
+        self.pdf_view.hide()
+        self.pdf_view.regionDrawn.connect(self._on_region_drawn)
+        self.pdf_view.regionClicked.connect(self._on_region_clicked)
+        self.pdf_view.regionContextMenuRequested.connect(self._on_region_context_menu)
+        # The page pane never takes keyboard focus, so drawing or picking a
+        # region leaves focus in the text pane and the coding shortcuts
+        # (Space, Enter) keep working on the selection it just made.
+        for widget in (self.pdf_view.previous_page_button, self.pdf_view.next_page_button):
+            widget.setFocusPolicy(Qt.NoFocus)
+        self._pdf_source: pdf_extract.PdfPageSource | None = None
+
         self.code_tree = CodeTreeWidget()
         self.code_tree.setHeaderHidden(True)
         self.code_tree.setColumnCount(2)
@@ -366,10 +380,17 @@ class MainWindow(QMainWindow):
         viewer_bottom_bar.addStretch()
         viewer_bottom_bar.addWidget(self.insert_mode_button)
 
+        self.viewer_splitter = QSplitter(Qt.Horizontal)
+        self.viewer_splitter.addWidget(self.viewer)
+        self.viewer_splitter.addWidget(self.pdf_view)
+
         viewer_container = QWidget()
         viewer_layout = QVBoxLayout(viewer_container)
         viewer_layout.setContentsMargins(0, 0, 0, 0)
-        viewer_layout.addWidget(self.viewer)
+        # Stretch 1: a horizontal QSplitter's vertical size policy is only
+        # Preferred, so without this it splits the pane's height with the
+        # username label below it instead of taking what's left.
+        viewer_layout.addWidget(self.viewer_splitter, 1)
         viewer_layout.addWidget(self.username_label)
         viewer_layout.addLayout(viewer_bottom_bar)
 
@@ -710,6 +731,7 @@ class MainWindow(QMainWindow):
             self._current_document_id = None
             self.viewer.clear()
             self.viewer.set_code_highlights([])
+            self._load_pdf_pane(None)
             self._refresh_codes()
             self._on_viewer_cursor_moved()
             return
@@ -717,6 +739,7 @@ class MainWindow(QMainWindow):
         doc = db.get_document(self.conn, doc_id)
         self._current_document_id = doc_id
         self.viewer.setPlainText(doc.content if doc else "")
+        self._load_pdf_pane(doc)
         self._refresh_highlights()
         self._refresh_codes()
         self._on_viewer_cursor_moved()
@@ -1217,6 +1240,7 @@ class MainWindow(QMainWindow):
         self.viewer.exit_insert_mode()
         self.viewer.clear()
         self.viewer.set_code_highlights([])
+        self._load_pdf_pane(None)
         self._refresh_documents()
         self._refresh_codes()
         self._update_actions_enabled()
@@ -1229,14 +1253,28 @@ class MainWindow(QMainWindow):
         existing = db.get_document_by_name(self.conn, path.name)
         if existing is not None and not overwrite:
             return False
+        is_pdf = path.suffix.lower() == ".pdf"
         try:
             content = text_extract.read_document_text(path)
+            # A PDF's pages have to be rendered to mark regions on them, so
+            # the file itself is stored in the project rather than referenced
+            # by a path that may not be there next time.
+            source_data = path.read_bytes() if is_pdf else None
         except text_extract.DocumentReadError as exc:
             QMessageBox.warning(self, "Import Failed", str(exc))
             return False
+        except OSError as exc:
+            QMessageBox.warning(self, "Import Failed", f"Could not read {path.name}: {exc}")
+            return False
         if existing is not None:
             db.delete_document(self.conn, existing.id)
-        doc = db.create_document(self.conn, path.name, content)
+        doc = db.create_document(
+            self.conn,
+            path.name,
+            content,
+            kind=db.DOCUMENT_KIND_PDF if is_pdf else db.DOCUMENT_KIND_TEXT,
+            source_data=source_data,
+        )
         self._refresh_documents()
         self._select_document(doc.id)
         return True
@@ -1391,14 +1429,20 @@ class MainWindow(QMainWindow):
         db.update_document_content(
             self.conn, self._current_document_id, self.viewer.toPlainText()
         )
-        self._adjust_segments_for_edit(position, chars_removed, chars_added)
+        self._adjust_offsets_for_edit(position, chars_removed, chars_added)
         self._refresh_codes()
         self._refresh_highlights()
         self._render_segments_panel()
 
-    def _adjust_segments_for_edit(
+    def _adjust_offsets_for_edit(
         self, position: int, chars_removed: int, chars_added: int
     ) -> None:
+        """Remap every stored offset in the current document through one edit.
+
+        Called both for a user's insert-mode edit and for the region markers
+        this window splices in itself, so `documents.content` is the single
+        thing segment and region offsets are ever measured against.
+        """
         removed_end = position + chars_removed
         delta = chars_added - chars_removed
 
@@ -1416,6 +1460,225 @@ class MainWindow(QMainWindow):
                 db.delete_segment(self.conn, segment.id)
             elif (new_start, new_end) != (segment.start_offset, segment.end_offset):
                 db.update_segment_offsets(self.conn, segment.id, new_start, new_end)
+
+        self._adjust_region_offsets_for_edit(position, chars_removed, chars_added)
+
+    def _adjust_region_offsets_for_edit(
+        self, position: int, chars_removed: int, chars_added: int
+    ) -> None:
+        """Remap region markers through the same edit as the segments above.
+
+        A region's marker is a single character rather than a span, so it
+        follows insertions at its own offset (it is pushed along, where a
+        segment starting there would grow to include the typed text), and a
+        region whose marker was edited away is deleted outright.
+        """
+        removed_end = position + chars_removed
+        delta = chars_added - chars_removed
+        content = self.viewer.toPlainText()
+
+        for region in db.list_regions_for_document(self.conn, self._current_document_id):
+            if region.text_offset < position:
+                continue
+            if region.text_offset < removed_end:
+                db.delete_region(self.conn, region.id)  # the marker itself is gone
+                continue
+            new_offset = region.text_offset + delta
+            if content[new_offset : new_offset + 1] != pdf_extract.REGION_MARKER:
+                db.delete_region(self.conn, region.id)
+            elif new_offset != region.text_offset:
+                db.update_region_offset(self.conn, region.id, new_offset)
+
+    # -- PDF pages and their coded regions --------------------------------
+
+    def _load_pdf_pane(self, doc: db.Document | None) -> None:
+        """Show the page pane for a PDF document, hide it for anything else."""
+        was_showing = not self.pdf_view.isHidden()
+        self._pdf_source = None
+        if doc is not None and doc.is_pdf and doc.source_data:
+            try:
+                self._pdf_source = pdf_extract.PdfPageSource(bytes(doc.source_data), doc.name)
+            except text_extract.DocumentReadError as exc:
+                QMessageBox.warning(self, "Could Not Open PDF", str(exc))
+        self.pdf_view.set_source(self._pdf_source)
+        self.pdf_view.setVisible(self._pdf_source is not None)
+        if self._pdf_source is not None and not was_showing:
+            # A third of the width when the pane first appears; after that
+            # wherever the user has dragged the splitter to.
+            width = max(self.viewer_splitter.width(), 1)
+            self.viewer_splitter.setSizes([width * 2 // 3, width // 3])
+
+    def _sync_pdf_page_to_cursor(self) -> None:
+        """Turn the page to whichever one the text cursor is sitting in."""
+        if self._pdf_source is None:
+            return
+        cursor = self.viewer.textCursor()
+        position = cursor.selectionStart() if cursor.hasSelection() else cursor.position()
+        self.pdf_view.set_page(
+            pdf_extract.page_for_offset(self.viewer.toPlainText(), position)
+        )
+
+    def _refresh_region_marks(self) -> None:
+        """Redraw the current page's regions in the codes now applied to them."""
+        if self._pdf_source is None or self.conn is None or self._current_document_id is None:
+            self.pdf_view.set_marks([])
+            return
+
+        regions = db.list_regions_for_page(
+            self.conn, self._current_document_id, self.pdf_view.page
+        )
+        if not regions:
+            self.pdf_view.set_marks([])
+            return
+
+        codes_by_id = {code.id: code for code in db.list_codes(self.conn)}
+        selected_usernames = self._selected_usernames()
+        colors_by_region: dict[int, list[QColor]] = {region.id: [] for region in regions}
+        for segment in db.list_segments_for_document(self.conn, self._current_document_id):
+            if (segment.created_by or "") not in selected_usernames:
+                continue
+            covered = [
+                region
+                for region in regions
+                if segment.start_offset <= region.text_offset < segment.end_offset
+            ]
+            if not covered:
+                continue
+            code = codes_by_id.get(segment.code_id)
+            color = QColor(code.color if code and code.color else "#ffff00")
+            color.setAlpha(HIGHLIGHT_ALPHA)
+            for region in covered:
+                colors_by_region[region.id].append(color)
+
+        selected_offsets = self._viewer_selected_offsets()
+        self.pdf_view.set_marks(
+            [
+                RegionMark(
+                    region_id=region.id,
+                    rect=QRectF(region.x, region.y, region.width, region.height),
+                    colors=tuple(colors_by_region[region.id]),
+                    selected=region.text_offset in selected_offsets,
+                )
+                for region in regions
+            ]
+        )
+
+    def _viewer_selected_offsets(self) -> range:
+        cursor = self.viewer.textCursor()
+        if cursor.hasSelection():
+            return range(cursor.selectionStart(), cursor.selectionEnd())
+        return range(cursor.position(), cursor.position() + 1)
+
+    def create_region(self, page: int, rect: QRectF) -> db.Region | None:
+        """Mark out a rectangular region of `page` and select it for coding.
+
+        The region's marker character is spliced into the document's text at
+        the end of that page's text, which is what makes it codeable (and
+        navigable) by everything that already works on a span of text.
+        """
+        if self.conn is None or self._current_document_id is None:
+            return None
+        content = self.viewer.toPlainText()
+        existing = db.list_regions_for_page(self.conn, self._current_document_id, page)
+        key = (rect.y(), rect.x())
+        insert_index = sum(1 for region in existing if (region.y, region.x) < key)
+        position = pdf_extract.region_marker_position(
+            content, page, len(existing), insert_index
+        )
+
+        self.viewer.replace_text(position, 0, pdf_extract.REGION_MARKER_LINE)
+        db.update_document_content(
+            self.conn, self._current_document_id, self.viewer.toPlainText()
+        )
+        self._adjust_offsets_for_edit(position, 0, len(pdf_extract.REGION_MARKER_LINE))
+        region = db.create_region(
+            self.conn,
+            self._current_document_id,
+            page,
+            position,
+            rect.x(),
+            rect.y(),
+            rect.width(),
+            rect.height(),
+            created_by=self.username,
+        )
+        self.select_region(region.id)
+        self._refresh_codes()
+        self._refresh_highlights()
+        return region
+
+    def delete_region(self, region_id: int) -> None:
+        """Remove a region, its codings, and its marker character."""
+        if self.conn is None or self._current_document_id is None:
+            return
+        region = db.get_region(self.conn, region_id)
+        if region is None:
+            return
+        content = self.viewer.toPlainText()
+        offset = region.text_offset
+        if content[offset : offset + 1] != pdf_extract.REGION_MARKER:
+            # Nothing to splice out; drop the row and leave the text alone.
+            db.delete_region(self.conn, region_id)
+            self._refresh_highlights()
+            return
+        # The marker is followed by its own newline (REGION_MARKER_LINE); an
+        # insert-mode edit could have taken that newline away, so check.
+        length = 2 if content[offset + 1 : offset + 2] == "\n" else 1
+
+        db.delete_region(self.conn, region_id)
+        self.viewer.replace_text(offset, length, "")
+        db.update_document_content(
+            self.conn, self._current_document_id, self.viewer.toPlainText()
+        )
+        self._adjust_offsets_for_edit(offset, length, 0)
+        self._refresh_codes()
+        self._refresh_highlights()
+        self._render_segments_panel()
+
+    def select_region(self, region_id: int) -> None:
+        """Select a region's marker in the text pane, ready to be coded."""
+        if self.conn is None:
+            return
+        region = db.get_region(self.conn, region_id)
+        if region is None:
+            return
+        self.pdf_view.set_page(region.page)
+        self.viewer.select_range(region.text_offset, region.text_offset + 1)
+        self.viewer.setFocus()
+
+    def _on_region_drawn(self, page: int, rect: QRectF) -> None:
+        self.create_region(page, rect)
+
+    def _on_region_clicked(self, region_id: int | None) -> None:
+        if region_id is None:
+            return
+        self.select_region(region_id)
+
+    def _on_region_context_menu(self, region_id: int | None, global_pos) -> None:
+        if self.conn is None or region_id is None:
+            return
+        region = db.get_region(self.conn, region_id)
+        if region is None:
+            return
+
+        menu = QMenu(self)
+        codes_by_id = {code.id: code for code in db.list_codes(self.conn)}
+        delete_segment_actions = {}
+        for segment in db.list_segments_for_document(self.conn, self._current_document_id):
+            if not segment.start_offset <= region.text_offset < segment.end_offset:
+                continue
+            code = codes_by_id.get(segment.code_id)
+            label = f'Remove Code ("{code.name}")' if code else "Remove Code"
+            delete_segment_actions[menu.addAction(label)] = segment.id
+        if delete_segment_actions:
+            menu.addSeparator()
+        delete_region_action = menu.addAction("Delete Region")
+
+        chosen = self._exec_context_menu(menu, global_pos)
+        if chosen is delete_region_action:
+            self.delete_region(region_id)
+        elif chosen in delete_segment_actions:
+            self._delete_segment(delete_segment_actions[chosen])
 
     def _apply_code_to_viewer_selection(self, code_id: int) -> bool:
         cursor = self.viewer.textCursor()
@@ -1711,6 +1974,7 @@ class MainWindow(QMainWindow):
         self._sync_matched_code_selection()
 
     def _refresh_highlights(self) -> None:
+        self._refresh_region_marks()
         if self.conn is None or self._current_document_id is None:
             self.viewer.set_code_highlights([])
             return
@@ -1784,6 +2048,8 @@ class MainWindow(QMainWindow):
 
     def _on_viewer_cursor_moved(self) -> None:
         self._update_line_position_label()
+        self._sync_pdf_page_to_cursor()
+        self._refresh_region_marks()
         if len(self._selected_usernames()) > 1:
             self._segments_panel_mode = "cursor"
             self._render_segments_panel()
@@ -1828,6 +2094,13 @@ class MainWindow(QMainWindow):
 
         selected_usernames = self._selected_usernames()
         documents_by_id = {doc.id: doc for doc in db.list_documents(self.conn)}
+        regions_by_document = {
+            doc_id: {
+                region.text_offset: region
+                for region in db.list_regions_for_document(self.conn, doc_id)
+            }
+            for doc_id in documents_by_id
+        }
 
         # Multiple selected users always show the cursor/selection-driven
         # grouped view (comparing everyone's codes at that span); a single
@@ -1842,7 +2115,9 @@ class MainWindow(QMainWindow):
                 for segment in self._segments_overlapping_viewer_selection()
                 if (segment.created_by or "") in selected_usernames
             ]
-            self._render_segments_grouped_by_code(segments, documents_by_id)
+            self._render_segments_grouped_by_code(
+                segments, documents_by_id, regions_by_document
+            )
             return
 
         code_id = self._segments_panel_code_id
@@ -1871,10 +2146,15 @@ class MainWindow(QMainWindow):
         ]
         segments.sort(key=lambda s: s.document_id != self._current_document_id)
         for segment in segments:
-            self._add_segment_list_item(segment, documents_by_id, code_id)
+            self._add_segment_list_item(
+                segment, documents_by_id, regions_by_document, code_id
+            )
 
     def _render_segments_grouped_by_code(
-        self, segments: list[db.Segment], documents_by_id: dict[int, db.Document]
+        self,
+        segments: list[db.Segment],
+        documents_by_id: dict[int, db.Document],
+        regions_by_document: dict[int, dict[int, db.Region]],
     ) -> None:
         """Show every code applied to `segments`, one colored header per code
         followed by its segments — so codes applied simultaneously to the
@@ -1906,15 +2186,27 @@ class MainWindow(QMainWindow):
                 segments_by_code[code_id], key=lambda s: s.document_id != self._current_document_id
             )
             for segment in group_segments:
-                self._add_segment_list_item(segment, documents_by_id, code_id)
+                self._add_segment_list_item(
+                    segment, documents_by_id, regions_by_document, code_id
+                )
 
     def _add_segment_list_item(
-        self, segment: db.Segment, documents_by_id: dict[int, db.Document], code_id: int
+        self,
+        segment: db.Segment,
+        documents_by_id: dict[int, db.Document],
+        regions_by_document: dict[int, dict[int, db.Region]],
+        code_id: int,
     ) -> None:
         doc = documents_by_id.get(segment.document_id)
         doc_name = doc.name if doc else "?"
         username = segment.created_by or NO_USERNAME_TEXT
-        full_text = doc.content[segment.start_offset : segment.end_offset] if doc else ""
+        full_text = (
+            reporting.segment_text(
+                doc, segment, regions_by_document.get(segment.document_id, {})
+            )
+            if doc
+            else ""
+        )
         snippet = full_text
         if len(snippet) > SNIPPET_MAX_LENGTH:
             snippet = snippet[:SNIPPET_MAX_LENGTH] + "…"
