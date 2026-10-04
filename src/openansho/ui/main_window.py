@@ -171,6 +171,9 @@ QLineEdit, QPlainTextEdit, QTreeWidget, QListWidget, QComboBox, QHeaderView::sec
 QTreeWidget::item:selected, QListWidget::item:selected {
     background-color: #333333;
 }
+QPushButton:checked {
+    background-color: #555555;
+}
 QPlainTextEdit#viewerPane {
     selection-background-color: #ffffff;
     selection-color: #000000;
@@ -196,6 +199,9 @@ QLineEdit, QPlainTextEdit, QTreeWidget, QListWidget, QComboBox, QHeaderView::sec
 }
 QTreeWidget::item:selected, QListWidget::item:selected {
     background-color: #d0e8ff;
+}
+QPushButton:checked {
+    background-color: #c8c8c8;
 }
 QPlainTextEdit#viewerPane {
     selection-background-color: #000000;
