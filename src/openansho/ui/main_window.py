@@ -1688,6 +1688,9 @@ class MainWindow(QMainWindow):
 
     def _on_region_clicked(self, region_id: int | None) -> None:
         if region_id is None:
+            # Empty page space: let go of the selection (a region's, most
+            # likely), the way a click on a word already does.
+            self.active_viewer.exit_visual_mode()
             return
         self.select_region(region_id)
 

@@ -303,6 +303,23 @@ def test_clicking_a_region_selects_it_on_the_page(qtbot, tmp_path, write_pdf):
     assert viewer.textCursor().selectionStart() == region.text_offset
 
 
+def test_clicking_off_every_region_deselects_the_selected_one(qtbot, tmp_path, write_pdf):
+    window = _pdf_window(qtbot, tmp_path, write_pdf)
+    viewer = window.pdf_viewer
+    region = window.create_region(0, FIGURE)  # drawing it leaves it selected
+    assert viewer.marks[0].selected
+
+    empty = viewport_point(viewer, 0, (0.65 * 612, 0.85 * 792))
+    assert viewer.region_at(empty) is None
+    assert not viewer._text_map.is_over_text(0, viewer.to_page_point(0, empty))
+    QTest.mouseClick(viewer.viewport(), Qt.LeftButton, Qt.NoModifier, empty)
+
+    assert not viewer.textCursor().hasSelection()
+    assert viewer.mode == PdfViewer.NORMAL
+    assert not viewer.marks[0].selected
+    assert db.get_region(window.conn, region.id) is not None
+
+
 # -- coding regions -----------------------------------------------------------
 
 

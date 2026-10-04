@@ -75,6 +75,7 @@ SHORTCUT_SECTIONS = [
             ("Drag across words", "Select them, ready for a code"),
             ("Drag off the text", "Draw a region — the only place a region can start"),
             ("Click a region", "Select it, ready for a code"),
+            ("Click off the text and regions", "Deselect"),
             ("Right-click", "Remove a code here, or delete the region under the cursor"),
             ("Ctrl+scroll", "Zoom in / out (the − and + buttons do the same)"),
             ("Rectangle / Freehand", "Choose how a drawn region is shaped"),
