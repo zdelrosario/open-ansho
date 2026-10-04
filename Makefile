@@ -8,7 +8,8 @@
 APP_NAME := OpenAnsho
 ENTRY_POINT := src/openansho/__main__.py
 ICON := images/kanji_shou_app_icon.png
-TUTORIAL := src/openansho/tutorial.txt
+TUTORIAL_TEXT := src/openansho/01 Introduction.txt
+TUTORIAL_PDF := src/openansho/02 PDF Coding.pdf
 DIST_DIR := dist
 BUILD_DIR := build
 VENV := .venv
@@ -18,12 +19,14 @@ ifeq ($(OS),Windows_NT)
     VENV_BIN := $(VENV)/Scripts
     SYSTEM_PYTHON := python
     ADD_DATA := $(ICON);images
-    ADD_TUTORIAL := $(TUTORIAL);openansho
+    ADD_TUTORIAL_TEXT := $(TUTORIAL_TEXT);openansho
+    ADD_TUTORIAL_PDF := $(TUTORIAL_PDF);openansho
 else
     VENV_BIN := $(VENV)/bin
     SYSTEM_PYTHON := python3
     ADD_DATA := $(ICON):images
-    ADD_TUTORIAL := $(TUTORIAL):openansho
+    ADD_TUTORIAL_TEXT := $(TUTORIAL_TEXT):openansho
+    ADD_TUTORIAL_PDF := $(TUTORIAL_PDF):openansho
 endif
 
 PYTHON := $(VENV_BIN)/python
@@ -101,7 +104,7 @@ clean:
 
 build-mac: install-build
 	$(PYINSTALLER) --name "$(APP_NAME)" --windowed --noconfirm --clean \
-		--icon $(ICON) --add-data "$(ADD_DATA)" --add-data "$(ADD_TUTORIAL)" \
+		--icon $(ICON) --add-data "$(ADD_DATA)" --add-data "$(ADD_TUTORIAL_TEXT)" --add-data "$(ADD_TUTORIAL_PDF)" \
 		--distpath $(DIST_DIR)/mac --workpath $(BUILD_DIR)/mac \
 		$(ENTRY_POINT)
 	chmod +x "$(DIST_DIR)/mac/$(APP_NAME).app/Contents/MacOS/$(APP_NAME)"
@@ -111,7 +114,7 @@ build-mac: install-build
 
 build-windows: install-build
 	$(PYINSTALLER) --name "$(APP_NAME)" --windowed --onefile --noconfirm --clean \
-		--icon $(ICON) --add-data "$(ADD_DATA)" --add-data "$(ADD_TUTORIAL)" \
+		--icon $(ICON) --add-data "$(ADD_DATA)" --add-data "$(ADD_TUTORIAL_TEXT)" --add-data "$(ADD_TUTORIAL_PDF)" \
 		--distpath $(DIST_DIR)/windows --workpath $(BUILD_DIR)/windows \
 		$(ENTRY_POINT)
 
@@ -129,7 +132,7 @@ build-windows: install-build
 # alongside it would just be a broken file for people to download by mistake.
 build-linux: install-build
 	$(PYINSTALLER) --name "$(APP_NAME)" --onefile --noconfirm --clean \
-		--add-data "$(ADD_DATA)" --add-data "$(ADD_TUTORIAL)" \
+		--add-data "$(ADD_DATA)" --add-data "$(ADD_TUTORIAL_TEXT)" --add-data "$(ADD_TUTORIAL_PDF)" \
 		--distpath $(DIST_DIR)/linux --workpath $(BUILD_DIR)/linux \
 		$(ENTRY_POINT)
 	chmod +x $(DIST_DIR)/linux/$(APP_NAME)

@@ -31,9 +31,12 @@ def test_icon_path_uses_the_pyinstaller_extraction_directory_when_frozen(tmp_pat
     assert entry_point._icon_path() == tmp_path / "images" / "kanji_shou_app_icon.png"
 
 
-def test_the_tutorial_text_ships_inside_the_package():
-    """tutorial.txt is package data, not a repo file: `open_tutorial_project`
-    reads it next to the module, so it has to travel with the wheel."""
+def test_the_tutorial_files_ship_inside_the_package():
+    """The tutorial documents are package data, not repo files:
+    `open_tutorial_project` reads them next to the module, so they have to
+    travel with the wheel."""
     from openansho import tutorial
 
-    assert (Path(tutorial.__file__).resolve().parent / "tutorial.txt").exists()
+    package_dir = Path(tutorial.__file__).resolve().parent
+    for name in tutorial.DOCUMENT_NAMES:
+        assert (package_dir / name).exists()
