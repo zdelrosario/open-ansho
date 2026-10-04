@@ -21,11 +21,22 @@ OFF_TEXT = (200, 300)
 
 
 def text_point(viewer, page=0, index=0):
-    """Page coordinates of the middle of a character's glyph."""
-    rect = viewer._text_map.rect_for_offset(
-        viewer._text_map.page_range(page)[0] + index
-    )[1]
-    return rect.center().x(), rect.center().y()
+    """Page coordinates of the middle of the `index`-th glyph on `page`.
+
+    Counts only characters that have a glyph: spaces and line breaks have
+    none, so there is no point on the page that means "the space".
+    """
+    text_map = viewer._text_map
+    start, end = text_map.page_range(page)
+    seen = 0
+    for offset in range(start, end):
+        located = text_map.rect_for_offset(offset)
+        if located is None:
+            continue
+        if seen == index:
+            return located[1].center().x(), located[1].center().y()
+        seen += 1
+    raise AssertionError(f"page {page} has fewer than {index + 1} glyphs")
 
 
 def open_pdf(qtbot, tmp_path, write_pdf, pages=PAGES, viewport=(700, 400)):
@@ -342,11 +353,12 @@ def test_clicking_in_a_text_block_covers_one_character_not_a_swathe_of_page(
     viewer.viewport().resize(700, 900)
 
     footer = viewer.toPlainText().index("footer line here")
+    _page, glyph = viewer._text_map.rect_for_offset(footer)
     QTest.mouseClick(
         viewer.viewport(),
         Qt.LeftButton,
         Qt.NoModifier,
-        viewport_point(viewer, 0, text_point(viewer, index=footer)),
+        viewport_point(viewer, 0, (glyph.center().x(), glyph.center().y())),
     )
 
     rect = viewer._cursor_rect()

@@ -84,9 +84,11 @@ def test_a_character_is_only_ever_as_tall_as_its_own_line(tmp_path, write_pdf):
     )
     source = pdf_extract.PdfPageSource(path.read_bytes())
 
-    heights = [rect.height() for rect in source.char_rects(0) if not rect.isEmpty()]
+    heights = [
+        box.height() for line in source.page_lines(0) for box in line.boxes
+    ]
 
-    assert heights
+    assert len(source.page_lines(0)) == 4  # the stray is its own line
     assert max(heights) < 3 * min(heights)
 
 
@@ -95,9 +97,14 @@ def test_characters_on_one_line_are_leveled_to_a_common_height(tmp_path, write_p
     source = pdf_extract.PdfPageSource(path.read_bytes())
 
     # Capitals, x-height letters and descenders all sit in the same band.
-    line = [rect for rect in source.char_rects(0) if not rect.isEmpty()]
-    assert len({round(rect.top()) for rect in line}) == 1
-    assert len({round(rect.height()) for rect in line}) == 1
+    rects = [
+        source.char_rect(0, index)
+        for index in range(len(source.raw_page_text(0)))
+        if source.char_rect(0, index) is not None
+    ]
+    assert len(rects) > 5
+    assert len({round(rect.top()) for rect in rects}) == 1
+    assert len({round(rect.height()) for rect in rects}) == 1
 
 
 # -- import -------------------------------------------------------------------

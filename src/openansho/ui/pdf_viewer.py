@@ -71,6 +71,9 @@ CONFLICT_OUTLINE_WIDTH = 2
 
 # A press and release within this many pixels is a click, not a drag.
 DRAG_THRESHOLD_PX = 5
+# How far back to look for a glyph to hang the caret off, for a character
+# that has none of its own (a space, a region marker, a page separator).
+CARET_SCAN_LIMIT = 24
 # Regions smaller than this fraction of the page in either direction are
 # dropped, so a slightly-dragged click leaves no speck behind.
 MIN_REGION_FRACTION = 0.01
@@ -435,7 +438,10 @@ class PdfViewer(VimTextNavigation, QAbstractScrollArea):
 
         page = self._text_map.page_for_offset(position)
         start, _end = self._text_map.page_range(page)
-        for previous in range(position - 1, start - 1, -1):
+        # Bounded: each step that finds nothing costs a call into the PDF,
+        # and a cursor sitting before any glyph on its page would otherwise
+        # walk the whole page asking about every character.
+        for previous in range(position - 1, max(start, position - CARET_SCAN_LIMIT) - 1, -1):
             located = self._text_map.rect_for_offset(previous)
             if located is not None:
                 found_page, rect = located

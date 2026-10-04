@@ -28,9 +28,10 @@ the no-Qt rule in the other non-UI modules is really protecting.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import QBuffer, QIODevice, QRectF, QSize, QSizeF
+from PySide6.QtCore import QBuffer, QIODevice, QPointF, QRectF, QSize, QSizeF
 from PySide6.QtGui import QImage
 from PySide6.QtPdf import QPdfDocument
 
@@ -99,7 +100,7 @@ def normalize_page_text(raw: str) -> tuple[str, list[int]]:
 
 
 class PdfPageSource:
-    """A loaded PDF: page text, page sizes, page images, glyph rectangles.
+    """A loaded PDF: its text, its page images, and where the two line up.
 
     Constructed from the bytes stored in `documents.source_data` rather than
     from a path, so a project file keeps working after the imported file is
@@ -122,7 +123,8 @@ class PdfPageSource:
                 )
             raise DocumentReadError(f"Could not read {name} as a PDF.")
         self._normalized: dict[int, tuple[str, list[int]]] = {}
-        self._char_rects: dict[int, list[QRectF]] = {}
+        self._page_lines: dict[int, list[TextLine]] = {}
+        self._char_rects: dict[tuple[int, int], QRectF | None] = {}
 
     @property
     def page_count(self) -> int:
@@ -150,91 +152,152 @@ class PdfPageSource:
     def render(self, page: int, size: QSize) -> QImage:
         return self._document.render(page, size)
 
-    def char_rects(self, page: int) -> list[QRectF]:
-        """Rectangle of each raw character of `page`, in page points.
+    # -- geometry ---------------------------------------------------------
+    #
+    # Every `QPdfDocument.getSelection*` call costs the same (~1.3ms on a
+    # dense page) however much text it asks about, because the engine walks
+    # the page's text each time. So geometry is gathered a *line* or a
+    # *range* at a time and cached, never a character at a time: asking per
+    # character made the first click on a page of a journal article take
+    # four and a half seconds.
 
-        The per-glyph boxes Qt reports are tight — a lowercase letter's box is
-        shorter than a capital's, and a space has none worth drawing — so each
-        character is stretched to the full vertical extent of the line it is
-        on. A cursor or a highlight drawn from these is then a steady height
-        along a line instead of bobbing with the letters.
+    def page_lines(self, page: int) -> list[TextLine]:
+        """Every line of `page`, with the rectangles its runs occupy.
+
+        One call per line of text rather than one per character. A line can
+        hold more than one rectangle — a style change, or a superscript,
+        starts a new run — and they are kept apart rather than merged, so a
+        character is leveled to the run it is actually on.
         """
-        if page in self._char_rects:
-            return self._char_rects[page]
+        if page in self._page_lines:
+            return self._page_lines[page]
 
-        text = self.raw_page_text(page)
-        rects = [
-            self._document.getSelectionAtIndex(page, index, 1).boundingRectangle()
-            for index in range(len(text))
-        ]
-        self._char_rects[page] = _level_rects_by_line(rects)
-        return self._char_rects[page]
+        raw = self.raw_page_text(page)
+        lines = []
+        for start, end in _line_spans(raw):
+            boxes = self._bounds(page, start, end - start)
+            if boxes:
+                lines.append(TextLine(start, end, tuple(boxes)))
+        self._page_lines[page] = lines
+        return lines
 
+    def line_at(self, page: int, raw_index: int) -> TextLine | None:
+        for line in self.page_lines(page):
+            if line.start <= raw_index < line.end:
+                return line
+        return None
 
-def _level_rects_by_line(rects: list[QRectF]) -> list[QRectF]:
-    """Give every character on a line the same top and height.
+    def char_rect(self, page: int, raw_index: int) -> QRectF | None:
+        """The rectangle of one character, or None where it has no glyph.
 
-    Characters are grouped into lines by where they sit: a character joins
-    the line being built if it overlaps that line's vertical extent by more
-    than half its own height, and otherwise starts a new one. Empty
-    rectangles (spaces, line breaks) inherit the line they fall in, and are
-    given the width of a space so the cursor has something to sit on.
+        Leveled to the full height of the run it sits on, so a cursor drawn
+        from it is a steady band along the line instead of bobbing with the
+        letters. Spaces and line breaks have no glyph and no rectangle.
+        """
+        key = (page, raw_index)
+        if key not in self._char_rects:
+            boxes = self._bounds(page, raw_index, 1)
+            rect = boxes[0] if boxes else None
+            if rect is not None:
+                line = self.line_at(page, raw_index)
+                run = line.run_for(rect) if line is not None else None
+                if run is not None:
+                    rect = QRectF(rect.left(), run.top(), rect.width(), run.height())
+            self._char_rects[key] = rect
+        return self._char_rects[key]
 
-    Deciding this by position rather than by reading order matters: a real
-    document's extraction order is not simply top-to-bottom. A journal page
-    whose margin line numbers come out after its footer jumps back *up* the
-    page, and a rule phrased as "a new line starts when the text moves left
-    or down" merges the two — making every character in the merged run as
-    tall as the gap between them, so clicking one covers half the page.
-    """
-    leveled: list[QRectF] = list(rects)
-    line_start = 0
+    def range_rects(self, page: int, raw_start: int, raw_end: int) -> list[QRectF]:
+        """The rectangles covering raw characters [start, end) of `page`.
 
-    def finish(start: int, end: int) -> None:
-        line = [rect for rect in rects[start:end] if not rect.isEmpty()]
-        if not line:
-            return
-        top = min(rect.top() for rect in line)
-        bottom = max(rect.bottom() for rect in line)
-        right_edge = max(rect.right() for rect in line)
-        space = max((bottom - top) * 0.4, 1.0)
-        previous_right = min(rect.left() for rect in line)
-        for index in range(start, end):
-            rect = rects[index]
-            if rect.isEmpty():
-                # A space or a line break: park it just past the last glyph,
-                # so the cursor lands somewhere sensible when it sits there.
-                left = min(previous_right, right_edge)
-                leveled[index] = QRectF(left, top, space, bottom - top)
+        One per run of the selection, which is what the engine returns — so
+        a coded span costs one call however long it is.
+        """
+        if raw_end <= raw_start:
+            return []
+        return self._bounds(page, raw_start, raw_end - raw_start)
+
+    def index_at(self, page: int, point: QPointF) -> int | None:
+        """Raw index of the character at `point`, or None if it is off the text."""
+        located = self._run_at(page, point)
+        if located is None:
+            return None
+        line, run = located
+        # Within a run, characters read left to right, so the right edge of
+        # the first k of them only grows with k — binary search it rather
+        # than asking about each character in turn.
+        low, high = 0, line.end - line.start
+        while low < high:
+            middle = (low + high) // 2
+            if self._prefix_right(page, line, run, middle + 1) < point.x():
+                low = middle + 1
             else:
-                leveled[index] = QRectF(rect.left(), top, rect.width(), bottom - top)
-                previous_right = rect.right()
+                high = middle
+        return min(line.start + low, line.end - 1)
 
-    extent: tuple[float, float] | None = None  # the line so far, as (top, bottom)
-    for index, rect in enumerate(rects):
-        if rect.isEmpty():
-            continue  # a space or a line break carries no position of its own
-        if extent is not None and not _shares_line(extent, rect):
-            finish(line_start, index)
-            line_start = index
-            extent = None
-        if extent is None:
-            extent = (rect.top(), rect.bottom())
-        else:
-            # Measuring against the line so far, rather than against the
-            # previous character, keeps a run of slightly-drifting
-            # characters from walking the line's extent down the page.
-            extent = (min(extent[0], rect.top()), max(extent[1], rect.bottom()))
-    finish(line_start, len(rects))
-    return leveled
+    def is_over_text(self, page: int, point: QPointF) -> bool:
+        """Whether `point` lands on a line of text on `page`."""
+        return self._run_at(page, point) is not None
+
+    def _run_at(self, page: int, point: QPointF) -> tuple[TextLine, QRectF] | None:
+        for line in self.page_lines(page):
+            for run in line.boxes:
+                if run.contains(point):
+                    return line, run
+        return None
+
+    def _prefix_right(self, page: int, line: TextLine, run: QRectF, count: int) -> float:
+        """Right edge of `line`'s first `count` characters, within `run`'s band."""
+        boxes = [
+            box
+            for box in self._bounds(page, line.start, count)
+            if box.bottom() > run.top() and box.top() < run.bottom()
+        ]
+        return max((box.right() for box in boxes), default=run.left())
+
+    def _bounds(self, page: int, start: int, count: int) -> list[QRectF]:
+        selection = self._document.getSelectionAtIndex(page, start, count)
+        return [
+            polygon.boundingRect()
+            for polygon in selection.bounds()
+            if not polygon.boundingRect().isEmpty()
+        ]
 
 
-def _shares_line(extent: tuple[float, float], rect: QRectF) -> bool:
-    """Whether `rect` sits on the line currently spanning `extent`."""
-    top, bottom = extent
-    overlap = min(bottom, rect.bottom()) - max(top, rect.top())
-    shorter = min(bottom - top, rect.height())
-    return overlap > 0.5 * shorter if shorter > 0 else overlap > 0
+@dataclass(frozen=True)
+class TextLine:
+    """One line of a page's text: where it starts and ends, and where it sits.
+
+    `start`/`end` are indices into the page's *raw* text. `boxes` holds one
+    rectangle per run on the line, kept separate rather than united so that
+    a character is leveled to its own run.
+    """
+
+    start: int
+    end: int
+    boxes: tuple[QRectF, ...]
+
+    def run_for(self, rect: QRectF) -> QRectF | None:
+        """The run `rect` sits on: the one it overlaps vertically the most."""
+        best, best_overlap = None, 0.0
+        for box in self.boxes:
+            overlap = min(box.bottom(), rect.bottom()) - max(box.top(), rect.top())
+            if overlap > best_overlap:
+                best, best_overlap = box, overlap
+        return best
+
+
+def _line_spans(raw: str) -> list[tuple[int, int]]:
+    """The [start, end) of each line of `raw`, excluding the line breaks."""
+    spans = []
+    start = 0
+    for index, character in enumerate(raw):
+        if character in "\r\n":
+            if index > start:
+                spans.append((start, index))
+            start = index + 1
+    if len(raw) > start:
+        spans.append((start, len(raw)))
+    return spans
 
 
 def page_ranges(content: str) -> list[tuple[int, int]]:
@@ -299,6 +362,11 @@ class PdfTextMap:
         self._content = content
         self._source = source
         self._ranges = page_ranges(content)
+        # Ranges are asked about again on every repaint — once per coded
+        # span, per frame — and the answers are in page coordinates, so they
+        # hold good across scrolling and zooming. A new map is built whenever
+        # the content changes, which is what empties this.
+        self._range_cache: dict[tuple[int, int], list[tuple[int, QRectF]]] = {}
 
     @property
     def page_count(self) -> int:
@@ -313,10 +381,78 @@ class PdfTextMap:
     def rect_for_offset(self, offset: int) -> tuple[int, QRectF] | None:
         """The page and rectangle of the character at `offset`, if it has one.
 
-        Region markers and the page separators have no glyph on the page, and
-        return None — callers decide what to draw for them.
+        Spaces, region markers and the page separators have no glyph on the
+        page and return None — callers decide what to draw for them.
         """
         page = self.page_for_offset(offset)
+        raw_index = self._raw_index(page, offset)
+        if raw_index is None:
+            return None
+        rect = self._source.char_rect(page, raw_index)
+        return (page, rect) if rect is not None else None
+
+    def rects_for_range(self, start: int, end: int) -> list[tuple[int, QRectF]]:
+        """One rectangle per run of characters in [start, end).
+
+        Asked of the PDF a page at a time rather than a character at a time:
+        a coded span of any length costs one call per page it touches.
+        """
+        cached = self._range_cache.get((start, end))
+        if cached is not None:
+            return cached
+        rects: list[tuple[int, QRectF]] = []
+        for page in range(self.page_for_offset(start), self.page_for_offset(end - 1) + 1):
+            page_start, page_end = self._ranges[page]
+            first = self._raw_index(page, max(start, page_start))
+            last = self._last_raw_index(page, min(end, page_end))
+            if first is None or last is None or last <= first:
+                continue
+            rects.extend(
+                (page, rect) for rect in self._source.range_rects(page, first, last)
+            )
+        self._range_cache[(start, end)] = rects
+        return rects
+
+    def offset_at(self, page: int, point: QPointF) -> int:
+        """The content offset of the character at `point` on `page`.
+
+        Used to put the text cursor where the user clicked. A click off the
+        text lands on the nearest character of the nearest line, so clicking
+        past the end of a line stays on that line.
+        """
+        if page >= len(self._ranges) or page >= self._source.page_count:
+            return len(self._content)
+        start, _end = self._ranges[page]
+        raw_index = self._source.index_at(page, point)
+        if raw_index is None:
+            raw_index = self._source.index_at(page, self._nearest_text_point(page, point))
+        if raw_index is None:
+            return start
+        return start + self._normalized_index(page, raw_index)
+
+    def is_over_text(self, page: int, point: QPointF) -> bool:
+        """Whether `point` lands on a character of `page`.
+
+        What decides between starting a text selection and drawing a region.
+        """
+        if page >= self._source.page_count:
+            return False
+        return self._source.is_over_text(page, point)
+
+    def _nearest_text_point(self, page: int, point: QPointF) -> QPointF:
+        """`point` pulled onto the closest run of text on the page."""
+        best, best_distance = point, None
+        for line in self._source.page_lines(page):
+            for run in line.boxes:
+                x = min(max(point.x(), run.left()), run.right())
+                y = min(max(point.y(), run.top()), run.bottom())
+                distance = (x - point.x()) ** 2 + (y - point.y()) ** 2
+                if best_distance is None or distance < best_distance:
+                    best, best_distance = QPointF(x, y), distance
+        return best
+
+    def _raw_index(self, page: int, offset: int) -> int | None:
+        """The raw index of the character at content `offset`, if it is one."""
         if page >= self._source.page_count:
             return None
         start, end = self._ranges[page]
@@ -324,87 +460,21 @@ class PdfTextMap:
         if index < 0 or offset >= end:
             return None
         indices = self._source.page_char_indices(page)
-        if index >= len(indices):
-            return None
-        rects = self._source.char_rects(page)
-        raw_index = indices[index]
-        if raw_index >= len(rects):
-            return None
-        rect = rects[raw_index]
-        return (page, rect) if not rect.isEmpty() else None
+        return indices[index] if index < len(indices) else None
 
-    def rects_for_range(self, start: int, end: int) -> list[tuple[int, QRectF]]:
-        """One rectangle per run of characters in [start, end) sharing a line.
-
-        Adjacent characters on the same line are merged, so a coded span is
-        painted as a few wide rectangles rather than one per letter.
-        """
-        runs: list[tuple[int, QRectF]] = []
-        for offset in range(start, end):
-            located = self.rect_for_offset(offset)
-            if located is None:
-                continue
-            page, rect = located
-            if runs:
-                last_page, last_rect = runs[-1]
-                if last_page == page and _same_line(last_rect, rect):
-                    runs[-1] = (page, last_rect.united(rect))
-                    continue
-            runs.append((page, QRectF(rect)))
-        return runs
-
-    def offset_at(self, page: int, point) -> int:
-        """The content offset of the character nearest `point` on `page`.
-
-        Used to put the text cursor where the user clicked. Picks the closest
-        character on the nearest line, so a click past the end of a line lands
-        on that line's end rather than somewhere else entirely.
-        """
-        if page >= len(self._ranges):
-            return len(self._content)
-        start, end = self._ranges[page]
+    def _last_raw_index(self, page: int, offset: int) -> int | None:
+        """One past the raw index of the last character before content `offset`."""
+        start, _end = self._ranges[page]
         indices = self._source.page_char_indices(page)
-        rects = self._source.char_rects(page)
-        if not indices:
-            return start
+        index = min(offset - start, len(indices))
+        return indices[index - 1] + 1 if index > 0 else None
 
-        best_offset = start
-        best_score = None
-        for index, raw_index in enumerate(indices):
-            if raw_index >= len(rects):
-                continue
-            rect = rects[raw_index]
-            if rect.isEmpty():
-                continue
-            # Lines first, then horizontal distance within the line, so a
-            # click to the right of a line stays on that line.
-            if rect.top() <= point.y() <= rect.bottom():
-                vertical = 0.0
-            else:
-                vertical = min(abs(point.y() - rect.top()), abs(point.y() - rect.bottom()))
-            horizontal = 0.0
-            if point.x() < rect.left():
-                horizontal = rect.left() - point.x()
-            elif point.x() > rect.right():
-                horizontal = point.x() - rect.right()
-            score = (vertical * 1000.0) + horizontal
-            if best_score is None or score < best_score:
-                best_score = score
-                best_offset = min(start + index, end)
-        return best_offset
-
-    def is_over_text(self, page: int, point) -> bool:
-        """Whether `point` lands on a character of `page`.
-
-        What decides between starting a text selection and drawing a region.
-        """
-        if page >= self._source.page_count:
-            return False
-        for rect in self._source.char_rects(page):
-            if not rect.isEmpty() and rect.contains(point):
-                return True
-        return False
+    def _normalized_index(self, page: int, raw_index: int) -> int:
+        """Where a raw index lands in the page's normalized text."""
+        indices = self._source.page_char_indices(page)
+        for index, raw in enumerate(indices):
+            if raw >= raw_index:
+                return index
+        return len(indices)
 
 
-def _same_line(first: QRectF, second: QRectF) -> bool:
-    return abs(first.top() - second.top()) < 0.5 and abs(first.height() - second.height()) < 0.5
