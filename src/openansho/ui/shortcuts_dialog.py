@@ -5,7 +5,9 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QLabel,
+    QScrollArea,
     QVBoxLayout,
+    QWidget,
 )
 
 SHORTCUT_SECTIONS = [
@@ -19,7 +21,7 @@ SHORTCUT_SECTIONS = [
         ],
     ),
     (
-        "Text pane",
+        "Document pane (text or PDF)",
         [
             ("Up / Down", "Cycle the matched/highlighted code (with a selection)"),
             ("Enter", "Apply the current code to the selection"),
@@ -40,7 +42,7 @@ SHORTCUT_SECTIONS = [
             ("f<char> / F<char>", "Jump forward / backward to next occurrence of char in document"),
             ("v", "Toggle visual (selection) mode"),
             ("V", "Enter visual mode with the entire current line selected"),
-            ("i", "Enter insert (text editing) mode"),
+            ("i", "Enter insert (text editing) mode — text documents only"),
             ("/", "Enter search mode (regex, smartcase)"),
             ("n / N", "Repeat last search forward / backward"),
             ("?", "Show this shortcuts popup"),
@@ -62,6 +64,28 @@ SHORTCUT_SECTIONS = [
         ],
     ),
     (
+        "PDF pane",
+        [
+            (
+                "(all of the above)",
+                "A PDF's pages carry the same text cursor and the same keys, "
+                "except insert mode — a PDF's text is a reading of its pages",
+            ),
+            ("Click a word", "Put the text cursor there"),
+            ("Drag across words", "Select them, ready for a code"),
+            ("Drag off the text", "Draw a region — the only place a region can start"),
+            ("Click a region", "Select it, ready for a code"),
+            ("Right-click", "Remove a code here, or delete the region under the cursor"),
+            ("Ctrl+scroll", "Zoom in / out (the − and + buttons do the same)"),
+            ("Rectangle / Freehand", "Choose how a drawn region is shaped"),
+            (
+                "▭",
+                "Each region counts as one character of the document's text, so "
+                "the motions and the coding shortcuts treat it like any other",
+            ),
+        ],
+    ),
+    (
         "Codebook",
         [
             ("Double-click a code", "Apply it to the text pane's current selection"),
@@ -79,18 +103,30 @@ class ShortcutsDialog(QDialog):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Keyboard Shortcuts")
-        self.resize(420, 480)
+        self.resize(520, 560)
 
-        layout = QVBoxLayout(self)
+        # The sections scroll rather than sizing the dialog to all of them:
+        # laid out in full they are taller than a 1080p screen, and the list
+        # only grows as shortcuts are added.
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
 
         for title, shortcuts in SHORTCUT_SECTIONS:
             heading = QLabel(f"<b>{title}</b>")
-            layout.addWidget(heading)
+            content_layout.addWidget(heading)
             for keys, description in shortcuts:
                 row = QLabel(f"<tt>{keys}</tt> — {description}")
                 row.setTextFormat(Qt.RichText)
-                layout.addWidget(row)
-            layout.addSpacing(8)
+                row.setWordWrap(True)
+                content_layout.addWidget(row)
+            content_layout.addSpacing(8)
+
+        scroll = QScrollArea()
+        scroll.setWidget(content)
+        scroll.setWidgetResizable(True)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(scroll, 1)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Close)
         buttons.rejected.connect(self.reject)

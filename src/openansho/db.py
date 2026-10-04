@@ -6,17 +6,23 @@ A project is a single .sqlite file containing documents, a codebook
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+
+DOCUMENT_KIND_TEXT = "text"
+DOCUMENT_KIND_PDF = "pdf"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS documents (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
     content TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    kind TEXT,
+    source_data BLOB
 );
 
 CREATE TABLE IF NOT EXISTS codes (
@@ -39,6 +45,20 @@ CREATE TABLE IF NOT EXISTS segments (
     created_by TEXT,
     created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS regions (
+    id INTEGER PRIMARY KEY,
+    document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+    page INTEGER NOT NULL,
+    text_offset INTEGER NOT NULL,
+    x REAL NOT NULL,
+    y REAL NOT NULL,
+    width REAL NOT NULL,
+    height REAL NOT NULL,
+    points TEXT,
+    created_by TEXT,
+    created_at TEXT NOT NULL
+);
 """
 
 
@@ -48,6 +68,56 @@ class Document:
     name: str
     content: str
     created_at: str
+    # Both default so a row from a project created before PDF support (where
+    # `_migrate` adds the columns as NULL) still builds a Document.
+    kind: str | None = None
+    source_data: bytes | None = None
+
+    @property
+    def is_pdf(self) -> bool:
+        return self.kind == DOCUMENT_KIND_PDF
+
+
+@dataclass(frozen=True)
+class Region:
+    """An area of one PDF page, coded like a span of text.
+
+    `text_offset` points at this region's marker character in the owning
+    document's `content` (see `pdf_extract.REGION_MARKER`): coding a region
+    is an ordinary `segments` row covering that single character, so
+    highlights, multi-code stripes, counts and exports need no special case.
+
+    `points` is the region's outline — `[[x, y], ...]` as JSON — and `x`/`y`/
+    `width`/`height` its bounding box. Both are fractions of the page's width
+    and height, so they survive being rendered at any zoom. A rectangle is
+    stored as its four corners, so the rectangle and freehand tools produce
+    the same kind of shape and only differ in how the user draws it; use
+    `outline()` rather than reading `points` directly, since it falls back to
+    the bounding box for a region stored before freehand existed.
+    """
+
+    id: int
+    document_id: int
+    page: int
+    text_offset: int
+    x: float
+    y: float
+    width: float
+    height: float
+    points: str | None
+    created_by: str | None
+    created_at: str
+
+    def outline(self) -> list[tuple[float, float]]:
+        """The region's outline in page fractions, corners included."""
+        if self.points:
+            return [(float(x), float(y)) for x, y in json.loads(self.points)]
+        return [
+            (self.x, self.y),
+            (self.x + self.width, self.y),
+            (self.x + self.width, self.y + self.height),
+            (self.x, self.y + self.height),
+        ]
 
 
 @dataclass(frozen=True)
@@ -103,11 +173,35 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if "description" not in code_columns:
         conn.execute("ALTER TABLE codes ADD COLUMN description TEXT")
 
+    region_columns = {row["name"] for row in conn.execute("PRAGMA table_info(regions)")}
+    if region_columns and "points" not in region_columns:
+        conn.execute("ALTER TABLE regions ADD COLUMN points TEXT")
 
-def create_document(conn: sqlite3.Connection, name: str, content: str) -> Document:
+    document_columns = {row["name"] for row in conn.execute("PRAGMA table_info(documents)")}
+    if "kind" not in document_columns:
+        conn.execute("ALTER TABLE documents ADD COLUMN kind TEXT")
+    if "source_data" not in document_columns:
+        conn.execute("ALTER TABLE documents ADD COLUMN source_data BLOB")
+
+
+def create_document(
+    conn: sqlite3.Connection,
+    name: str,
+    content: str,
+    kind: str = DOCUMENT_KIND_TEXT,
+    source_data: bytes | None = None,
+) -> Document:
+    """Insert a document.
+
+    `source_data` holds the bytes of the file the content was extracted from,
+    and is only stored for kinds that need the original to render (PDFs), so
+    a project file stays self-contained rather than depending on the imported
+    file staying where it was.
+    """
     cur = conn.execute(
-        "INSERT INTO documents (name, content, created_at) VALUES (?, ?, ?)",
-        (name, content, _now()),
+        "INSERT INTO documents (name, content, created_at, kind, source_data) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (name, content, _now(), kind, source_data),
     )
     conn.commit()
     return get_document(conn, cur.lastrowid)
@@ -361,3 +455,79 @@ def update_segment_offsets(
     )
     conn.commit()
     return get_segment(conn, segment_id)
+
+
+def create_region(
+    conn: sqlite3.Connection,
+    document_id: int,
+    page: int,
+    text_offset: int,
+    points: list[tuple[float, float]],
+    created_by: str | None = None,
+) -> Region:
+    """Record a region outlined by `points`, in page fractions.
+
+    The bounding box is derived and stored alongside, since ordering regions
+    down a page and hit-testing them coarsely both want it.
+    """
+    xs = [float(x) for x, _ in points]
+    ys = [float(y) for _, y in points]
+    cur = conn.execute(
+        """
+        INSERT INTO regions
+            (document_id, page, text_offset, x, y, width, height, points,
+             created_by, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            document_id,
+            page,
+            text_offset,
+            min(xs),
+            min(ys),
+            max(xs) - min(xs),
+            max(ys) - min(ys),
+            json.dumps([[float(x), float(y)] for x, y in points]),
+            created_by,
+            _now(),
+        ),
+    )
+    conn.commit()
+    return get_region(conn, cur.lastrowid)
+
+
+def get_region(conn: sqlite3.Connection, region_id: int) -> Region | None:
+    row = conn.execute("SELECT * FROM regions WHERE id = ?", (region_id,)).fetchone()
+    return Region(**row) if row else None
+
+
+def list_regions_for_document(conn: sqlite3.Connection, document_id: int) -> list[Region]:
+    rows = conn.execute(
+        "SELECT * FROM regions WHERE document_id = ? ORDER BY text_offset", (document_id,)
+    ).fetchall()
+    return [Region(**row) for row in rows]
+
+
+def list_regions_for_page(
+    conn: sqlite3.Connection, document_id: int, page: int
+) -> list[Region]:
+    rows = conn.execute(
+        "SELECT * FROM regions WHERE document_id = ? AND page = ? ORDER BY text_offset",
+        (document_id, page),
+    ).fetchall()
+    return [Region(**row) for row in rows]
+
+
+def update_region_offset(
+    conn: sqlite3.Connection, region_id: int, text_offset: int
+) -> Region:
+    conn.execute(
+        "UPDATE regions SET text_offset = ? WHERE id = ?", (text_offset, region_id)
+    )
+    conn.commit()
+    return get_region(conn, region_id)
+
+
+def delete_region(conn: sqlite3.Connection, region_id: int) -> None:
+    conn.execute("DELETE FROM regions WHERE id = ?", (region_id,))
+    conn.commit()
