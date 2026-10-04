@@ -110,6 +110,55 @@ def test_drawing_a_region_moves_later_segments_along_with_the_text(
     assert new_content[segment.start_offset : segment.end_offset] == "Second page."
 
 
+def test_a_new_region_above_a_coded_one_starts_out_uncoded(qtbot, tmp_path, write_pdf):
+    # The new region's marker goes in at the coded marker's own offset; the
+    # coding must move along with that marker rather than grow over the new one.
+    window = _pdf_window(qtbot, tmp_path, write_pdf)
+    code = window.add_code("Triangle")
+    lower = window.create_region(0, LOWER_FIGURE)
+    window.apply_segment(code.id, lower.text_offset, lower.text_offset + 1)
+
+    upper = window.create_region(0, FIGURE)
+
+    lower = db.get_region(window.conn, lower.id)
+    segments = _segments(window)
+    assert len(segments) == 1
+    assert (segments[0].start_offset, segments[0].end_offset) == (
+        lower.text_offset,
+        lower.text_offset + 1,
+    )
+    marks = {mark.region_id: mark for mark in window.pdf_viewer.marks}
+    assert marks[upper.id].colors == ()
+    assert len(marks[lower.id].colors) == 1
+
+
+def test_a_new_region_inside_a_coded_span_splits_the_span_around_it(
+    qtbot, tmp_path, write_pdf
+):
+    # Coding the page's last line together with the region after it, then
+    # drawing a region above that one, puts the new marker inside the span.
+    window = _pdf_window(qtbot, tmp_path, write_pdf)
+    code = window.add_code("Caption")
+    lower = window.create_region(0, LOWER_FIGURE)
+    window.apply_segment(code.id, 0, lower.text_offset + 1)
+    original = _segments(window)[0]
+
+    upper = window.create_region(0, FIGURE)
+
+    lower = db.get_region(window.conn, lower.id)
+    content = window.active_viewer.toPlainText()
+    pieces = sorted(_segments(window), key=lambda segment: segment.start_offset)
+    assert [content[s.start_offset : s.end_offset] for s in pieces] == [
+        "First page.\n",
+        MARKER,
+    ]
+    assert pieces[1].start_offset == lower.text_offset
+    assert {piece.code_id for piece in pieces} == {original.code_id}
+    marks = {mark.region_id: mark for mark in window.pdf_viewer.marks}
+    assert marks[upper.id].colors == ()
+    assert len(marks[lower.id].colors) == 1
+
+
 def test_every_regions_marker_survives_another_region_being_added(
     qtbot, tmp_path, write_pdf
 ):
@@ -252,6 +301,23 @@ def test_clicking_a_region_selects_it_on_the_page(qtbot, tmp_path, write_pdf):
 
     assert viewer.region_at(middle) == region.id
     assert viewer.textCursor().selectionStart() == region.text_offset
+
+
+def test_clicking_off_every_region_deselects_the_selected_one(qtbot, tmp_path, write_pdf):
+    window = _pdf_window(qtbot, tmp_path, write_pdf)
+    viewer = window.pdf_viewer
+    region = window.create_region(0, FIGURE)  # drawing it leaves it selected
+    assert viewer.marks[0].selected
+
+    empty = viewport_point(viewer, 0, (0.65 * 612, 0.85 * 792))
+    assert viewer.region_at(empty) is None
+    assert not viewer._text_map.is_over_text(0, viewer.to_page_point(0, empty))
+    QTest.mouseClick(viewer.viewport(), Qt.LeftButton, Qt.NoModifier, empty)
+
+    assert not viewer.textCursor().hasSelection()
+    assert viewer.mode == PdfViewer.NORMAL
+    assert not viewer.marks[0].selected
+    assert db.get_region(window.conn, region.id) is not None
 
 
 # -- coding regions -----------------------------------------------------------

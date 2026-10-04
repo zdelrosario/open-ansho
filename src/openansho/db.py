@@ -457,6 +457,38 @@ def update_segment_offsets(
     return get_segment(conn, segment_id)
 
 
+def split_segment(
+    conn: sqlite3.Connection, segment_id: int, first_end: int, second_start: int
+) -> tuple[Segment, Segment]:
+    """Cut a segment in two: itself up to `first_end`, a copy from `second_start`.
+
+    The copy keeps the original's code, memo, author and timestamp, so the two
+    pieces read as the one coding they were rather than as a new one.
+    """
+    segment = get_segment(conn, segment_id)
+    if not segment.start_offset < first_end <= second_start < segment.end_offset:
+        raise ValueError("split points must fall inside the segment, in order")
+    conn.execute("UPDATE segments SET end_offset = ? WHERE id = ?", (first_end, segment_id))
+    cur = conn.execute(
+        """
+        INSERT INTO segments
+            (document_id, code_id, start_offset, end_offset, memo, created_by, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            segment.document_id,
+            segment.code_id,
+            second_start,
+            segment.end_offset,
+            segment.memo,
+            segment.created_by,
+            segment.created_at,
+        ),
+    )
+    conn.commit()
+    return get_segment(conn, segment_id), get_segment(conn, cur.lastrowid)
+
+
 def create_region(
     conn: sqlite3.Connection,
     document_id: int,
