@@ -21,7 +21,7 @@ SHORTCUT_SECTIONS = [
         ],
     ),
     (
-        "Text pane",
+        "Document pane (text or PDF)",
         [
             ("Up / Down", "Cycle the matched/highlighted code (with a selection)"),
             ("Enter", "Apply the current code to the selection"),
@@ -42,7 +42,7 @@ SHORTCUT_SECTIONS = [
             ("f<char> / F<char>", "Jump forward / backward to next occurrence of char in document"),
             ("v", "Toggle visual (selection) mode"),
             ("V", "Enter visual mode with the entire current line selected"),
-            ("i", "Enter insert (text editing) mode"),
+            ("i", "Enter insert (text editing) mode — text documents only"),
             ("/", "Enter search mode (regex, smartcase)"),
             ("n / N", "Repeat last search forward / backward"),
             ("?", "Show this shortcuts popup"),
@@ -64,16 +64,24 @@ SHORTCUT_SECTIONS = [
         ],
     ),
     (
-        "PDF page pane",
+        "PDF pane",
         [
-            ("Drag", "Draw a rectangular region on the page and select it for coding"),
-            ("Click a region", "Select it in the text pane, ready for a code"),
-            ("Right-click a region", "Remove one of its codes, or delete the region"),
-            ("‹ / ›", "Turn to the previous / next page"),
+            (
+                "(all of the above)",
+                "A PDF's pages carry the same text cursor and the same keys, "
+                "except insert mode — a PDF's text is a reading of its pages",
+            ),
+            ("Click a word", "Put the text cursor there"),
+            ("Drag across words", "Select them, ready for a code"),
+            ("Drag off the text", "Draw a region — the only place a region can start"),
+            ("Click a region", "Select it, ready for a code"),
+            ("Right-click", "Remove a code here, or delete the region under the cursor"),
+            ("Ctrl+scroll", "Zoom in / out (the − and + buttons do the same)"),
+            ("Rectangle / Freehand", "Choose how a drawn region is shaped"),
             (
                 "▭",
-                "Each region's marker in the text pane — one character, so the "
-                "vim motions and coding shortcuts treat it like any other",
+                "Each region counts as one character of the document's text, so "
+                "the motions and the coding shortcuts treat it like any other",
             ),
         ],
     ),

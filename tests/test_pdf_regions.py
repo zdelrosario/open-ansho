@@ -1,57 +1,64 @@
-from PySide6.QtCore import QPoint, QRect, QRectF, Qt
-from PySide6.QtGui import QTextCursor
+"""Coding the parts of a PDF page that aren't text."""
+
+from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtTest import QTest
 
 from openansho import db, pdf_extract, reporting
-from openansho.ui.main_window import MainWindow
-from openansho.ui.vim_viewer import VimTextViewer
+from openansho.ui.pdf_viewer import REGION_FREEHAND, REGION_RECTANGLE, PdfViewer
+from test_pdf_viewer import OFF_TEXT, open_pdf, text_point, viewport_point
 
 MARKER = pdf_extract.REGION_MARKER
 
-# Somewhere over the figure each sample page carries, in page fractions.
-FIGURE = QRectF(0.08, 0.20, 0.30, 0.15)
-LOWER_FIGURE = QRectF(0.08, 0.60, 0.30, 0.15)
+PAGES = [["First page."], ["Second page."]]
+
+# Region outlines in page fractions: the four corners of a rectangle.
+FIGURE = [(0.08, 0.30), (0.38, 0.30), (0.38, 0.45), (0.08, 0.45)]
+LOWER_FIGURE = [(0.08, 0.60), (0.38, 0.60), (0.38, 0.75), (0.08, 0.75)]
 
 
-def _pdf_window(qtbot, tmp_path, write_pdf, pages=(["First page."], ["Second page."])):
-    window = MainWindow()
-    qtbot.addWidget(window)
-    window.show()
-    window.create_project(tmp_path / "project.sqlite")
-    write_pdf(tmp_path / "doc.pdf", list(pages))
-    window.import_document(tmp_path / "doc.pdf")
-    window.document_list.setCurrentRow(0)
-    return window
+def _pdf_window(qtbot, tmp_path, write_pdf, pages=PAGES):
+    return open_pdf(qtbot, tmp_path, write_pdf, pages=pages)
 
 
 def _segments(window):
     return db.list_segments_for_document(window.conn, window._current_document_id)
 
 
+def _regions(window):
+    return db.list_regions_for_document(window.conn, window._current_document_id)
+
+
 def _place_cursor(window, position):
-    cursor = window.viewer.textCursor()
+    cursor = window.active_viewer.textCursor()
     cursor.setPosition(position)
-    window.viewer.setTextCursor(cursor)
+    window.active_viewer.setTextCursor(cursor)
 
 
 # -- drawing regions ----------------------------------------------------------
 
 
-def test_drawing_a_region_adds_one_marker_at_the_end_of_its_page(qtbot, tmp_path, write_pdf):
+def test_drawing_a_region_adds_one_marker_at_the_end_of_its_page(
+    qtbot, tmp_path, write_pdf
+):
     window = _pdf_window(qtbot, tmp_path, write_pdf)
 
     region = window.create_region(0, FIGURE)
 
-    content = window.viewer.toPlainText()
+    content = window.active_viewer.toPlainText()
     assert content == f"First page.\n{MARKER}\n\f\nSecond page.\n"
     assert content[region.text_offset] == MARKER
     assert region.page == 0
-    assert (region.x, region.y, region.width, region.height) == (
-        FIGURE.x(),
-        FIGURE.y(),
-        FIGURE.width(),
-        FIGURE.height(),
-    )
+    assert region.outline() == FIGURE
+
+
+def test_a_region_keeps_its_outline_and_its_bounding_box(qtbot, tmp_path, write_pdf):
+    window = _pdf_window(qtbot, tmp_path, write_pdf)
+
+    region = window.create_region(0, FIGURE)
+
+    assert (region.x, region.y) == (0.08, 0.30)
+    assert round(region.width, 6) == 0.30
+    assert round(region.height, 6) == 0.15
 
 
 def test_the_marker_is_saved_to_the_documents_content(qtbot, tmp_path, write_pdf):
@@ -60,7 +67,7 @@ def test_the_marker_is_saved_to_the_documents_content(qtbot, tmp_path, write_pdf
     window.create_region(1, FIGURE)
 
     doc = db.get_document(window.conn, window._current_document_id)
-    assert doc.content == window.viewer.toPlainText()
+    assert doc.content == window.active_viewer.toPlainText()
     assert doc.content == f"First page.\n\f\nSecond page.\n{MARKER}\n"
 
 
@@ -69,11 +76,10 @@ def test_a_drawn_region_is_selected_and_ready_to_code(qtbot, tmp_path, write_pdf
 
     region = window.create_region(0, FIGURE)
 
-    cursor = window.viewer.textCursor()
+    cursor = window.active_viewer.textCursor()
     assert cursor.selectionStart() == region.text_offset
     assert cursor.selectionEnd() == region.text_offset + 1
-    assert window.viewer.mode == VimTextViewer.VISUAL
-    assert window.pdf_view.page == 0
+    assert window.active_viewer.mode == PdfViewer.VISUAL
 
 
 def test_regions_on_a_page_are_ordered_down_the_page(qtbot, tmp_path, write_pdf):
@@ -85,7 +91,6 @@ def test_regions_on_a_page_are_ordered_down_the_page(qtbot, tmp_path, write_pdf)
     upper = db.get_region(window.conn, upper.id)
     lower = db.get_region(window.conn, lower.id)
     assert upper.text_offset < lower.text_offset
-    assert window.viewer.toPlainText().startswith(f"First page.\n{MARKER}\n{MARKER}\n\f")
 
 
 def test_drawing_a_region_moves_later_segments_along_with_the_text(
@@ -93,31 +98,160 @@ def test_drawing_a_region_moves_later_segments_along_with_the_text(
 ):
     window = _pdf_window(qtbot, tmp_path, write_pdf)
     code = window.add_code("Later")
-    content = window.viewer.toPlainText()
+    content = window.active_viewer.toPlainText()
     start = content.index("Second page.")
     window.apply_segment(code.id, start, start + len("Second page."))
 
     window.create_region(0, FIGURE)  # inserts a marker earlier in the document
 
     segment = _segments(window)[0]
-    new_content = window.viewer.toPlainText()
+    new_content = window.active_viewer.toPlainText()
     assert segment.start_offset == start + len(pdf_extract.REGION_MARKER_LINE)
     assert new_content[segment.start_offset : segment.end_offset] == "Second page."
 
 
-def test_a_region_only_shifts_markers_after_it(qtbot, tmp_path, write_pdf):
+def test_every_regions_marker_survives_another_region_being_added(
+    qtbot, tmp_path, write_pdf
+):
     window = _pdf_window(qtbot, tmp_path, write_pdf)
 
-    second_page_region = window.create_region(1, FIGURE)
-    first_page_region = window.create_region(0, FIGURE)
+    window.create_region(1, FIGURE)
+    window.create_region(0, FIGURE)
+    window.create_region(1, LOWER_FIGURE)
 
-    content = window.viewer.toPlainText()
-    for region in db.list_regions_for_document(window.conn, window._current_document_id):
+    content = window.active_viewer.toPlainText()
+    assert len(_regions(window)) == 3
+    for region in _regions(window):
         assert content[region.text_offset] == MARKER
-    assert db.get_region(window.conn, first_page_region.id).page == 0
-    assert db.get_region(
-        window.conn, second_page_region.id
-    ).text_offset > first_page_region.text_offset
+
+
+# -- the two region tools -----------------------------------------------------
+
+
+def test_the_rectangle_tool_is_the_default(qtbot, tmp_path, write_pdf):
+    window = _pdf_window(qtbot, tmp_path, write_pdf)
+
+    assert window.pdf_pane.region_mode == REGION_RECTANGLE
+    assert window.pdf_pane.rectangle_button.isChecked()
+    assert not window.pdf_pane.freehand_button.isChecked()
+
+
+def test_the_freehand_button_switches_tools_and_back(qtbot, tmp_path, write_pdf):
+    window = _pdf_window(qtbot, tmp_path, write_pdf)
+
+    window.pdf_pane.freehand_button.click()
+
+    assert window.pdf_pane.region_mode == REGION_FREEHAND
+    assert window.pdf_viewer.region_mode == REGION_FREEHAND
+
+    window.pdf_pane.rectangle_button.click()
+
+    assert window.pdf_pane.region_mode == REGION_RECTANGLE
+
+
+def test_the_fixtures_figure_really_is_off_the_text(qtbot, tmp_path, write_pdf):
+    """Guards the two points the drawing tests below are built on."""
+    window = _pdf_window(qtbot, tmp_path, write_pdf)
+    text_map = window.pdf_viewer._text_map
+
+    assert text_map.is_over_text(0, QPointF(*text_point(window.pdf_viewer)))
+    assert not text_map.is_over_text(0, QPointF(*OFF_TEXT))
+
+
+def test_dragging_off_the_text_draws_a_rectangle(qtbot, tmp_path, write_pdf):
+    window = _pdf_window(qtbot, tmp_path, write_pdf)
+    viewer = window.pdf_viewer
+    start = viewport_point(viewer, 0, OFF_TEXT)
+    end = viewport_point(viewer, 0, (OFF_TEXT[0] + 120, OFF_TEXT[1] + 90))
+
+    QTest.mousePress(viewer.viewport(), Qt.LeftButton, Qt.NoModifier, start)
+    QTest.mouseMove(viewer.viewport(), end)
+    QTest.mouseRelease(viewer.viewport(), Qt.LeftButton, Qt.NoModifier, end)
+
+    regions = _regions(window)
+    assert len(regions) == 1
+    assert len(regions[0].outline()) == 4  # a rectangle's corners
+    assert regions[0].page == 0
+
+
+def test_dragging_freehand_off_the_text_draws_the_shape_drawn(
+    qtbot, tmp_path, write_pdf
+):
+    window = _pdf_window(qtbot, tmp_path, write_pdf)
+    viewer = window.pdf_viewer
+    window.pdf_pane.freehand_button.click()
+    path = [(200, 300), (250, 290), (290, 320), (270, 370), (210, 360)]
+    points = [viewport_point(viewer, 0, point) for point in path]
+
+    QTest.mousePress(viewer.viewport(), Qt.LeftButton, Qt.NoModifier, points[0])
+    for point in points[1:]:
+        QTest.mouseMove(viewer.viewport(), point)
+    QTest.mouseRelease(viewer.viewport(), Qt.LeftButton, Qt.NoModifier, points[-1])
+
+    regions = _regions(window)
+    assert len(regions) == 1
+    # Every point of the drag is kept, so the stored shape is the drawn one
+    # rather than the box around it.
+    assert len(regions[0].outline()) > 4
+
+
+def test_dragging_across_text_selects_instead_of_drawing_a_region(
+    qtbot, tmp_path, write_pdf
+):
+    window = _pdf_window(qtbot, tmp_path, write_pdf)
+    viewer = window.pdf_viewer
+    start = viewport_point(viewer, 0, text_point(viewer))
+    end = viewport_point(viewer, 0, text_point(viewer, index=9))
+
+    QTest.mousePress(viewer.viewport(), Qt.LeftButton, Qt.NoModifier, start)
+    QTest.mouseMove(viewer.viewport(), end)
+    QTest.mouseRelease(viewer.viewport(), Qt.LeftButton, Qt.NoModifier, end)
+
+    assert _regions(window) == []
+    assert viewer.textCursor().hasSelection()
+
+
+def test_a_freehand_drag_across_text_also_selects_rather_than_drawing(
+    qtbot, tmp_path, write_pdf
+):
+    window = _pdf_window(qtbot, tmp_path, write_pdf)
+    viewer = window.pdf_viewer
+    window.pdf_pane.freehand_button.click()
+    start = viewport_point(viewer, 0, text_point(viewer))
+    end = viewport_point(viewer, 0, text_point(viewer, index=9))
+
+    QTest.mousePress(viewer.viewport(), Qt.LeftButton, Qt.NoModifier, start)
+    QTest.mouseMove(viewer.viewport(), end)
+    QTest.mouseRelease(viewer.viewport(), Qt.LeftButton, Qt.NoModifier, end)
+
+    assert _regions(window) == []
+    assert viewer.textCursor().hasSelection()
+
+
+def test_a_speck_of_a_drag_leaves_no_region(qtbot, tmp_path, write_pdf):
+    window = _pdf_window(qtbot, tmp_path, write_pdf)
+    viewer = window.pdf_viewer
+    start = viewport_point(viewer, 0, OFF_TEXT)
+    end = start + QPoint(7, 6)  # past the click threshold, under the size floor
+
+    QTest.mousePress(viewer.viewport(), Qt.LeftButton, Qt.NoModifier, start)
+    QTest.mouseMove(viewer.viewport(), end)
+    QTest.mouseRelease(viewer.viewport(), Qt.LeftButton, Qt.NoModifier, end)
+
+    assert _regions(window) == []
+
+
+def test_clicking_a_region_selects_it_on_the_page(qtbot, tmp_path, write_pdf):
+    window = _pdf_window(qtbot, tmp_path, write_pdf)
+    viewer = window.pdf_viewer
+    region = window.create_region(0, FIGURE)
+    _place_cursor(window, 0)
+
+    middle = viewport_point(viewer, 0, (0.23 * 612, 0.375 * 792))
+    QTest.mouseClick(viewer.viewport(), Qt.LeftButton, Qt.NoModifier, middle)
+
+    assert viewer.region_at(middle) == region.id
+    assert viewer.textCursor().selectionStart() == region.text_offset
 
 
 # -- coding regions -----------------------------------------------------------
@@ -128,14 +262,16 @@ def test_a_region_is_coded_by_the_ordinary_coding_shortcut(qtbot, tmp_path, writ
     code = window.add_code("Figure")
 
     region = window.create_region(0, FIGURE)
-    qtbot.waitUntil(lambda: window.viewer.hasFocus())
-    QTest.keyClick(window.viewer, Qt.Key_Return)
+    qtbot.waitUntil(lambda: window.pdf_viewer.hasFocus())
+    QTest.keyClick(window.pdf_viewer, Qt.Key_Return)
 
     segments = _segments(window)
     assert len(segments) == 1
     assert segments[0].code_id == code.id
-    assert segments[0].start_offset == region.text_offset
-    assert segments[0].end_offset == region.text_offset + 1
+    assert (segments[0].start_offset, segments[0].end_offset) == (
+        region.text_offset,
+        region.text_offset + 1,
+    )
 
 
 def test_a_region_takes_more_than_one_code(qtbot, tmp_path, write_pdf):
@@ -148,22 +284,8 @@ def test_a_region_takes_more_than_one_code(qtbot, tmp_path, write_pdf):
     window.apply_segment(second.id, region.text_offset, region.text_offset + 1)
 
     assert {segment.code_id for segment in _segments(window)} == {first.id, second.id}
-    assert len(window.pdf_view.marks) == 1
-    assert len(window.pdf_view.marks[0].colors) == 2
-
-
-def test_clicking_a_region_selects_it_for_coding(qtbot, tmp_path, write_pdf):
-    window = _pdf_window(qtbot, tmp_path, write_pdf)
-    region = window.create_region(0, FIGURE)
-    _place_cursor(window, 0)
-
-    window.select_region(region.id)
-
-    cursor = window.viewer.textCursor()
-    assert (cursor.selectionStart(), cursor.selectionEnd()) == (
-        region.text_offset,
-        region.text_offset + 1,
-    )
+    assert len(window.pdf_viewer.marks) == 1
+    assert len(window.pdf_viewer.marks[0].colors) == 2
 
 
 def test_x_on_a_region_marker_removes_its_codes_but_keeps_the_region(
@@ -174,17 +296,17 @@ def test_x_on_a_region_marker_removes_its_codes_but_keeps_the_region(
     region = window.create_region(0, FIGURE)
     window.apply_segment(code.id, region.text_offset, region.text_offset + 1)
 
-    window.viewer.exit_visual_mode()
+    window.pdf_viewer.exit_visual_mode()
     _place_cursor(window, region.text_offset)
-    window.viewer.setFocus()
-    qtbot.waitUntil(lambda: window.viewer.hasFocus())
-    QTest.keyClick(window.viewer, Qt.Key_X)
+    window.pdf_viewer.setFocus()
+    qtbot.waitUntil(lambda: window.pdf_viewer.hasFocus())
+    QTest.keyClick(window.pdf_viewer, Qt.Key_X)
 
     assert _segments(window) == []
     assert db.get_region(window.conn, region.id) is not None
 
 
-# -- the page pane ------------------------------------------------------------
+# -- what the page shows ------------------------------------------------------
 
 
 def test_an_uncoded_region_is_drawn_without_a_color(qtbot, tmp_path, write_pdf):
@@ -192,10 +314,11 @@ def test_an_uncoded_region_is_drawn_without_a_color(qtbot, tmp_path, write_pdf):
 
     region = window.create_region(0, FIGURE)
 
-    marks = window.pdf_view.marks
+    marks = window.pdf_viewer.marks
     assert [mark.region_id for mark in marks] == [region.id]
     assert marks[0].colors == ()
     assert marks[0].selected
+    assert marks[0].points == tuple(FIGURE)
 
 
 def test_a_coded_region_is_drawn_in_its_codes_color(qtbot, tmp_path, write_pdf):
@@ -205,159 +328,34 @@ def test_a_coded_region_is_drawn_in_its_codes_color(qtbot, tmp_path, write_pdf):
 
     window.apply_segment(code.id, region.text_offset, region.text_offset + 1)
 
-    mark = window.pdf_view.marks[0]
+    mark = window.pdf_viewer.marks[0]
     assert mark.colors[0].name() == code.color.lower()
     assert mark.colors[0].alpha() < 255  # translucent, so the page shows through
 
 
-def test_only_the_visible_pages_regions_are_drawn(qtbot, tmp_path, write_pdf):
+def test_regions_from_every_page_are_known_to_the_pane(qtbot, tmp_path, write_pdf):
     window = _pdf_window(qtbot, tmp_path, write_pdf)
+
     first = window.create_region(0, FIGURE)
     second = window.create_region(1, FIGURE)
 
-    window.pdf_view.set_page(0)
-    window._refresh_region_marks()
-    assert [mark.region_id for mark in window.pdf_view.marks] == [first.id]
-
-    window.pdf_view.set_page(1)
-    window._refresh_region_marks()
-    assert [mark.region_id for mark in window.pdf_view.marks] == [second.id]
+    # Pages scroll continuously, so both are drawn; each knows its own page.
+    marks = {mark.region_id: mark.page for mark in window.pdf_viewer.marks}
+    assert marks == {first.id: 0, second.id: 1}
 
 
-def test_a_regions_rectangle_maps_onto_the_rendered_page(qtbot, tmp_path, write_pdf):
-    window = _pdf_window(qtbot, tmp_path, write_pdf)
-    canvas = window.pdf_view.canvas
-    canvas.resize(300, 400)
-    window.create_region(0, FIGURE)
+def test_a_coded_span_of_text_is_highlighted_on_the_page(qtbot, tmp_path, write_pdf):
+    window = _pdf_window(qtbot, tmp_path, write_pdf, pages=[["First page."]])
+    code = window.add_code("Opening")
 
-    page_rect = canvas.page_rect()
-    drawn = canvas.from_page_fractions(FIGURE)
+    window.apply_segment(code.id, 0, 5)
 
-    assert page_rect.contains(drawn)
-    assert canvas.region_at(drawn.center()) == window.pdf_view.marks[0].region_id
-    assert canvas.region_at(page_rect.bottomRight()) is None
-
-
-def test_dragging_on_the_page_creates_a_region_there(qtbot, tmp_path, write_pdf):
-    window = _pdf_window(qtbot, tmp_path, write_pdf)
-    canvas = window.pdf_view.canvas
-    canvas.resize(300, 400)
-    page_rect = canvas.page_rect()
-    start = page_rect.topLeft() + QPoint(20, 30)
-    end = start + QPoint(90, 60)
-
-    QTest.mousePress(canvas, Qt.LeftButton, Qt.NoModifier, start)
-    QTest.mouseMove(canvas, end)
-    QTest.mouseRelease(canvas, Qt.LeftButton, Qt.NoModifier, end)
-
-    regions = db.list_regions_for_document(window.conn, window._current_document_id)
-    assert len(regions) == 1
-    assert regions[0].page == 0
-    assert canvas.from_page_fractions(
-        QRectF(regions[0].x, regions[0].y, regions[0].width, regions[0].height)
-    ) == QRect(start, end).normalized()
-    assert window.viewer.textCursor().selectionStart() == regions[0].text_offset
-
-
-def test_a_bare_click_on_empty_page_space_creates_nothing(qtbot, tmp_path, write_pdf):
-    window = _pdf_window(qtbot, tmp_path, write_pdf)
-    canvas = window.pdf_view.canvas
-    canvas.resize(300, 400)
-    point = canvas.page_rect().center()
-
-    QTest.mouseClick(canvas, Qt.LeftButton, Qt.NoModifier, point)
-
-    assert db.list_regions_for_document(window.conn, window._current_document_id) == []
-
-
-def test_clicking_a_region_on_the_page_selects_its_marker(qtbot, tmp_path, write_pdf):
-    window = _pdf_window(qtbot, tmp_path, write_pdf)
-    canvas = window.pdf_view.canvas
-    canvas.resize(300, 400)
-    region = window.create_region(0, FIGURE)
-    _place_cursor(window, 0)
-
-    QTest.mouseClick(
-        canvas,
-        Qt.LeftButton,
-        Qt.NoModifier,
-        canvas.from_page_fractions(FIGURE).center(),
-    )
-
-    assert window.viewer.textCursor().selectionStart() == region.text_offset
-    assert window.viewer.mode == VimTextViewer.VISUAL
-
-
-def test_a_rectangle_dragged_on_the_canvas_becomes_page_fractions(
-    qtbot, tmp_path, write_pdf
-):
-    window = _pdf_window(qtbot, tmp_path, write_pdf)
-    canvas = window.pdf_view.canvas
-    canvas.resize(300, 400)
-    page_rect = canvas.page_rect()
-
-    half = page_rect.adjusted(0, 0, -page_rect.width() // 2, -page_rect.height() // 2)
-    fractions = canvas.to_page_fractions(half)
-
-    assert 0.45 < fractions.width() < 0.55
-    assert 0.45 < fractions.height() < 0.55
-    assert fractions.x() < 0.01
-
-
-# -- vim navigation over a region ---------------------------------------------
-
-
-def test_a_region_marker_is_a_single_character_for_the_vim_motions(
-    qtbot, tmp_path, write_pdf
-):
-    window = _pdf_window(qtbot, tmp_path, write_pdf)
-    region = window.create_region(0, FIGURE)
-    window.viewer.exit_visual_mode()
-    qtbot.waitUntil(lambda: window.viewer.hasFocus())
-
-    # The marker sits alone on its own line, so k/j step onto and off it...
-    _place_cursor(window, region.text_offset)
-    QTest.keyClick(window.viewer, Qt.Key_K)
-    assert window.viewer.textCursor().position() == 0  # the line of text above
-
-    QTest.keyClick(window.viewer, Qt.Key_J)
-    assert window.viewer.textCursor().position() == region.text_offset
-
-    # ...and one l moves clear of it, rather than through an image's worth of text.
-    QTest.keyClick(window.viewer, Qt.Key_L)
-    assert window.viewer.textCursor().position() == region.text_offset + 1
-
-
-def test_a_region_marker_is_one_step_for_the_word_motions(qtbot, tmp_path, write_pdf):
-    window = _pdf_window(qtbot, tmp_path, write_pdf, pages=[["Figure follows."]])
-    region = window.create_region(0, FIGURE)
-    window.viewer.exit_visual_mode()
-    _place_cursor(window, 0)
-    qtbot.waitUntil(lambda: window.viewer.hasFocus())
-
-    QTest.keyClick(window.viewer, Qt.Key_W, Qt.ShiftModifier)  # onto "follows."
-    QTest.keyClick(window.viewer, Qt.Key_W, Qt.ShiftModifier)  # onto the marker
-
-    assert window.viewer.textCursor().position() == region.text_offset
-
-
-def test_a_pdf_with_no_text_at_all_can_still_be_coded_by_region(
-    qtbot, tmp_path, write_pdf
-):
-    """A scanned document extracts to nothing, so its regions are the only
-    thing there is to code."""
-    window = _pdf_window(qtbot, tmp_path, write_pdf, pages=[[], []])
-    code = window.add_code("Scan")
-
-    # Nothing but the page separator: two pages, no text on either.
-    assert window.viewer.toPlainText() == "\n\f\n\n"
-
-    region = window.create_region(1, FIGURE)
-    window.apply_segment(code.id, region.text_offset, region.text_offset + 1)
-
-    assert window.viewer.toPlainText() == f"\n\f\n\n{MARKER}\n"
-    assert window.viewer.toPlainText()[region.text_offset] == MARKER
-    assert [segment.code_id for segment in _segments(window)] == [code.id]
+    viewer = window.pdf_viewer
+    rects = viewer._text_map.rects_for_range(0, 5)
+    assert len(rects) == 1
+    page, rect = rects[0]
+    assert page == 0
+    assert viewer.page_rect(0).contains(viewer.from_page_rect(page, rect).toRect())
 
 
 # -- editing and deleting -----------------------------------------------------
@@ -373,8 +371,7 @@ def test_deleting_a_region_removes_its_marker_and_its_codes(qtbot, tmp_path, wri
 
     assert db.get_region(window.conn, region.id) is None
     assert _segments(window) == []
-    assert MARKER not in window.viewer.toPlainText()
-    assert window.viewer.toPlainText() == "First page.\n\f\nSecond page.\n"
+    assert window.active_viewer.toPlainText() == "First page.\n\f\nSecond page.\n"
     assert db.get_document(window.conn, window._current_document_id).content == (
         "First page.\n\f\nSecond page.\n"
     )
@@ -390,58 +387,49 @@ def test_deleting_a_region_keeps_the_other_regions_pointing_at_their_markers(
 
     window.delete_region(upper.id)
 
-    content = window.viewer.toPlainText()
-    remaining = db.list_regions_for_document(window.conn, window._current_document_id)
-    assert {region.id for region in remaining} == {lower.id, later.id}
-    for region in remaining:
+    content = window.active_viewer.toPlainText()
+    assert {region.id for region in _regions(window)} == {lower.id, later.id}
+    for region in _regions(window):
         assert content[region.text_offset] == MARKER
-
-
-def test_editing_the_marker_away_deletes_the_region(qtbot, tmp_path, write_pdf):
-    window = _pdf_window(qtbot, tmp_path, write_pdf)
-    region = window.create_region(0, FIGURE)
-    window.viewer.exit_visual_mode()
-
-    window.viewer.enter_insert_mode()
-    cursor = window.viewer.textCursor()
-    cursor.setPosition(region.text_offset)
-    cursor.setPosition(region.text_offset + 1, QTextCursor.KeepAnchor)
-    window.viewer.setTextCursor(cursor)
-    QTest.keyClick(window.viewer, Qt.Key_Backspace)
-
-    assert db.get_region(window.conn, region.id) is None
-    assert MARKER not in window.viewer.toPlainText()
-
-
-def test_typing_before_a_marker_moves_the_region_with_it(qtbot, tmp_path, write_pdf):
-    window = _pdf_window(qtbot, tmp_path, write_pdf)
-    region = window.create_region(0, FIGURE)
-    window.viewer.exit_visual_mode()
-
-    window.viewer.enter_insert_mode()
-    _place_cursor(window, 0)
-    QTest.keyClicks(window.viewer, "Hi ")
-
-    moved = db.get_region(window.conn, region.id)
-    assert moved is not None
-    assert moved.text_offset == region.text_offset + 3
-    assert window.viewer.toPlainText()[moved.text_offset] == MARKER
 
 
 def test_regions_survive_reopening_the_project(qtbot, tmp_path, write_pdf):
     window = _pdf_window(qtbot, tmp_path, write_pdf)
     code = window.add_code("Figure")
-    region = window.create_region(0, FIGURE)
+    region = window.create_region(0, LOWER_FIGURE)
     window.apply_segment(code.id, region.text_offset, region.text_offset + 1)
 
     window.open_project(tmp_path / "project.sqlite")
     window.document_list.setCurrentRow(0)
 
-    reopened = db.list_regions_for_document(window.conn, window._current_document_id)
+    reopened = _regions(window)
     assert len(reopened) == 1
     assert reopened[0].text_offset == region.text_offset
-    assert window.viewer.toPlainText()[reopened[0].text_offset] == MARKER
-    assert [mark.colors for mark in window.pdf_view.marks] != [()]
+    assert reopened[0].outline() == LOWER_FIGURE
+    assert window.active_viewer.toPlainText()[reopened[0].text_offset] == MARKER
+    assert window.pdf_viewer.marks[0].colors  # still coded, still colored
+
+
+def test_a_region_stored_before_freehand_falls_back_to_its_box(tmp_path):
+    """`points` is added by migration, so an older region has none."""
+    conn = db.connect(tmp_path / "old.sqlite")
+    doc = db.create_document(conn, "a.pdf", "x", kind=db.DOCUMENT_KIND_PDF)
+    conn.execute(
+        "INSERT INTO regions (document_id, page, text_offset, x, y, width, height, "
+        "created_at) VALUES (?, 0, 0, 0.1, 0.2, 0.3, 0.4, 'now')",
+        (doc.id,),
+    )
+    conn.commit()
+
+    region = db.list_regions_for_document(conn, doc.id)[0]
+
+    assert region.points is None
+    assert region.outline() == [
+        (0.1, 0.2),
+        (0.4, 0.2),
+        (0.4, 0.6000000000000001),
+        (0.1, 0.6000000000000001),
+    ]
 
 
 # -- reporting ----------------------------------------------------------------
@@ -458,8 +446,9 @@ def test_exports_describe_a_coded_region_instead_of_its_marker(
     path = tmp_path / "segments.csv"
     reporting.export_segments_csv(window.conn, path)
 
-    assert "[image region, page 2]" in path.read_text(encoding="utf-8")
-    assert MARKER not in path.read_text(encoding="utf-8")
+    exported = path.read_text(encoding="utf-8")
+    assert "[image region, page 2]" in exported
+    assert MARKER not in exported
 
 
 def test_the_coded_segments_pane_describes_a_region(qtbot, tmp_path, write_pdf):
@@ -472,16 +461,3 @@ def test_the_coded_segments_pane_describes_a_region(qtbot, tmp_path, write_pdf):
         window.segment_list.item(row).text() for row in range(window.segment_list.count())
     ]
     assert any("[image region, page 1]" in label for label in labels)
-
-
-def test_a_segment_spanning_text_and_a_region_keeps_both(qtbot, tmp_path, write_pdf):
-    window = _pdf_window(qtbot, tmp_path, write_pdf, pages=[["Caption."]])
-    code = window.add_code("Figure")
-    region = window.create_region(0, FIGURE)
-    window.apply_segment(code.id, 0, region.text_offset + 1)
-
-    document = db.get_document(window.conn, window._current_document_id)
-    regions_by_offset = {region.text_offset: region}
-    text = reporting.segment_text(document, _segments(window)[0], regions_by_offset)
-
-    assert text == "Caption.\n[image region, page 1]"

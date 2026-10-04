@@ -9,7 +9,9 @@ Open Ansho is a free and open-source desktop app for qualitative data analysis o
 
 Documents can be imported as plain text (`.txt`), Microsoft Word (`.docx`), or PDF (`.pdf`) files; Word documents are converted to plain text on import, one line per paragraph.
 
-A PDF's text is extracted and coded exactly like any other document, with a page pane beside the text showing the page you are reading. Drag out a rectangle on that page to mark a figure, photo, or any other non-text area, then code it with the same keys you code text with — it can carry several codes at once, just like a span of text. Each marked region shows up in the text as a single `▭` character, so the Vim motions step over an image in one keystroke.
+A PDF opens as its own pages, scrolling continuously, and you code it right there: the cursor and every Vim keybinding work on the words on the page, and Ctrl+scroll zooms (scroll sideways once a page is wider than the pane). The one thing you cannot do to a PDF is edit its text, since the text is a reading of the pages.
+
+Figures, photos and anything else that isn't text are coded as regions. Drag anywhere there is no text to draw one — a rectangle, or a freehand shape if you switch tools with the button under the page — and then code it with the same keys you code text with, more than once if it needs more than one code. Each region counts as a single character of the document, so the Vim motions step over an image in one keystroke.
 
 The app opens on a built-in tutorial that walks you through coding your first document, so there is nothing to set up before trying it. The tutorial is a scratch project held in memory — code it up however you like, then use File > New Project when you're ready to work on your own data. Nothing from the tutorial is saved, so it starts fresh every time you open the app (File > Open Tutorial brings it back mid-session).
 

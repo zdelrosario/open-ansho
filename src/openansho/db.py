@@ -6,6 +6,7 @@ A project is a single .sqlite file containing documents, a codebook
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -54,6 +55,7 @@ CREATE TABLE IF NOT EXISTS regions (
     y REAL NOT NULL,
     width REAL NOT NULL,
     height REAL NOT NULL,
+    points TEXT,
     created_by TEXT,
     created_at TEXT NOT NULL
 );
@@ -78,15 +80,20 @@ class Document:
 
 @dataclass(frozen=True)
 class Region:
-    """A rectangular area of one PDF page, coded like a span of text.
+    """An area of one PDF page, coded like a span of text.
 
     `text_offset` points at this region's marker character in the owning
     document's `content` (see `pdf_extract.REGION_MARKER`): coding a region
     is an ordinary `segments` row covering that single character, so
     highlights, multi-code stripes, counts and exports need no special case.
 
-    `x`/`y`/`width`/`height` are fractions of the page's width and height,
-    so they survive being rendered at any zoom level.
+    `points` is the region's outline — `[[x, y], ...]` as JSON — and `x`/`y`/
+    `width`/`height` its bounding box. Both are fractions of the page's width
+    and height, so they survive being rendered at any zoom. A rectangle is
+    stored as its four corners, so the rectangle and freehand tools produce
+    the same kind of shape and only differ in how the user draws it; use
+    `outline()` rather than reading `points` directly, since it falls back to
+    the bounding box for a region stored before freehand existed.
     """
 
     id: int
@@ -97,8 +104,20 @@ class Region:
     y: float
     width: float
     height: float
+    points: str | None
     created_by: str | None
     created_at: str
+
+    def outline(self) -> list[tuple[float, float]]:
+        """The region's outline in page fractions, corners included."""
+        if self.points:
+            return [(float(x), float(y)) for x, y in json.loads(self.points)]
+        return [
+            (self.x, self.y),
+            (self.x + self.width, self.y),
+            (self.x + self.width, self.y + self.height),
+            (self.x, self.y + self.height),
+        ]
 
 
 @dataclass(frozen=True)
@@ -153,6 +172,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE codes ADD COLUMN color_class TEXT")
     if "description" not in code_columns:
         conn.execute("ALTER TABLE codes ADD COLUMN description TEXT")
+
+    region_columns = {row["name"] for row in conn.execute("PRAGMA table_info(regions)")}
+    if region_columns and "points" not in region_columns:
+        conn.execute("ALTER TABLE regions ADD COLUMN points TEXT")
 
     document_columns = {row["name"] for row in conn.execute("PRAGMA table_info(documents)")}
     if "kind" not in document_columns:
@@ -439,19 +462,35 @@ def create_region(
     document_id: int,
     page: int,
     text_offset: int,
-    x: float,
-    y: float,
-    width: float,
-    height: float,
+    points: list[tuple[float, float]],
     created_by: str | None = None,
 ) -> Region:
+    """Record a region outlined by `points`, in page fractions.
+
+    The bounding box is derived and stored alongside, since ordering regions
+    down a page and hit-testing them coarsely both want it.
+    """
+    xs = [float(x) for x, _ in points]
+    ys = [float(y) for _, y in points]
     cur = conn.execute(
         """
         INSERT INTO regions
-            (document_id, page, text_offset, x, y, width, height, created_by, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (document_id, page, text_offset, x, y, width, height, points,
+             created_by, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (document_id, page, text_offset, x, y, width, height, created_by, _now()),
+        (
+            document_id,
+            page,
+            text_offset,
+            min(xs),
+            min(ys),
+            max(xs) - min(xs),
+            max(ys) - min(ys),
+            json.dumps([[float(x), float(y)] for x, y in points]),
+            created_by,
+            _now(),
+        ),
     )
     conn.commit()
     return get_region(conn, cur.lastrowid)

@@ -42,27 +42,28 @@ def test_a_file_that_is_not_a_pdf_reports_a_readable_error(tmp_path):
 
 
 def test_page_ranges_cover_each_pages_text():
+    """A page's range is exactly its text: the separator belongs to neither."""
     content = "one\n\f\ntwo\n\f\nthree"
 
     assert [content[start:end] for start, end in pdf_extract.page_ranges(content)] == [
         "one\n",
-        "\ntwo\n",
-        "\nthree",
+        "two\n",
+        "three",
     ]
 
 
 def test_a_document_without_separators_is_a_single_page():
     assert pdf_extract.page_ranges("plain text") == [(0, 10)]
-    assert pdf_extract.page_count_in_text("plain text") == 1
+    assert pdf_extract.page_for_offset("plain text", 7) == 0
 
 
 @pytest.mark.parametrize(
     "offset, expected_page",
-    [(0, 0), (3, 0), (4, 0), (5, 1), (9, 1), (10, 2)],
+    [(0, 0), (3, 0), (4, 0), (6, 1), (9, 1), (11, 2)],
 )
 def test_page_for_offset(offset, expected_page):
-    # "one\n" \f "\ntwo" \f "x": separators at offsets 4 and 9.
-    content = "one\n\f\ntwo\fx"
+    # "one\n" | \f\n | "two\n" | \f\n | "x"
+    content = "one\n\f\ntwo\n\f\nx"
 
     assert pdf_extract.page_for_offset(content, offset) == expected_page
 
@@ -126,7 +127,7 @@ def test_documents_from_a_project_predating_pdf_support_still_load(tmp_path):
 # -- the page pane ------------------------------------------------------------
 
 
-def test_the_page_pane_appears_only_for_pdf_documents(qtbot, tmp_path, write_pdf):
+def test_the_page_pane_is_up_only_for_pdf_documents(qtbot, tmp_path, write_pdf):
     window = MainWindow()
     qtbot.addWidget(window)
     _open_project(window, tmp_path)
@@ -135,16 +136,16 @@ def test_the_page_pane_appears_only_for_pdf_documents(qtbot, tmp_path, write_pdf
     window.import_document(text_path)
     _import_pdf(window, tmp_path, write_pdf, [["Hello."]])
 
-    assert not window.pdf_view.isHidden()
-    assert window.pdf_view.page_count == 1
+    assert window.viewer_stack.currentWidget() is window.pdf_pane
+    assert window.pdf_viewer.page_count == 1
 
     window.document_list.setCurrentRow(0)  # back to the text document
 
-    assert window.pdf_view.isHidden()
-    assert window.pdf_view.page_count == 0
+    assert window.viewer_stack.currentWidget() is window.viewer
+    assert window.pdf_viewer.page_count == 0
 
 
-def test_closing_the_project_hides_the_page_pane(qtbot, tmp_path, write_pdf):
+def test_closing_the_project_puts_the_text_pane_back(qtbot, tmp_path, write_pdf):
     window = MainWindow()
     qtbot.addWidget(window)
     _open_project(window, tmp_path)
@@ -152,7 +153,8 @@ def test_closing_the_project_hides_the_page_pane(qtbot, tmp_path, write_pdf):
 
     window.close_project()
 
-    assert window.pdf_view.isHidden()
+    assert window.viewer_stack.currentWidget() is window.viewer
+    assert window.pdf_viewer.page_count == 0
 
 
 def test_a_pdf_reopened_from_the_project_file_renders_without_the_original(
@@ -168,23 +170,18 @@ def test_a_pdf_reopened_from_the_project_file_renders_without_the_original(
     window.open_project(project)
     window.document_list.setCurrentRow(0)
 
-    assert window.pdf_view.page_count == 2
+    assert window.pdf_viewer.page_count == 2
 
 
-def test_moving_the_text_cursor_turns_the_page(qtbot, tmp_path, write_pdf):
+def test_every_page_is_laid_out_at_once(qtbot, tmp_path, write_pdf):
+    """Pages scroll continuously, so there is no current page to turn to."""
     window = MainWindow()
     qtbot.addWidget(window)
     _open_project(window, tmp_path)
     _import_pdf(window, tmp_path, write_pdf, [["First."], ["Second."], ["Third."]])
-    content = window.viewer.toPlainText()
 
-    cursor = window.viewer.textCursor()
-    cursor.setPosition(content.index("Second."))
-    window.viewer.setTextCursor(cursor)
-
-    assert window.pdf_view.page == 1
-
-    cursor.setPosition(content.index("Third."))
-    window.viewer.setTextCursor(cursor)
-
-    assert window.pdf_view.page == 2
+    viewer = window.pdf_viewer
+    assert viewer.page_count == 3
+    tops = [viewer.page_rect(page).top() for page in range(3)]
+    assert tops == sorted(tops)
+    assert len(set(tops)) == 3
