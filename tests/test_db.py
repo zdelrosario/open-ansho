@@ -258,6 +258,34 @@ def test_update_segment_offsets(conn):
     assert (db.get_segment(conn, segment.id).start_offset, db.get_segment(conn, segment.id).end_offset) == (6, 11)
 
 
+def test_split_segment_keeps_both_pieces_as_the_same_coding(conn):
+    doc = db.create_document(conn, "interview_01.txt", "Hello world.")
+    code = db.create_code(conn, "Greeting")
+    segment = db.create_segment(conn, doc.id, code.id, 0, 11, memo="a note", created_by="ana")
+
+    first, second = db.split_segment(conn, segment.id, 5, 6)
+
+    assert first.id == segment.id
+    assert (first.start_offset, first.end_offset) == (0, 5)
+    assert (second.start_offset, second.end_offset) == (6, 11)
+    for piece in (first, second):
+        assert (piece.code_id, piece.memo, piece.created_by, piece.created_at) == (
+            code.id,
+            "a note",
+            "ana",
+            segment.created_at,
+        )
+
+
+def test_split_segment_rejects_points_outside_the_segment(conn):
+    doc = db.create_document(conn, "interview_01.txt", "Hello world.")
+    code = db.create_code(conn, "Greeting")
+    segment = db.create_segment(conn, doc.id, code.id, 2, 8)
+
+    with pytest.raises(ValueError):
+        db.split_segment(conn, segment.id, 2, 4)  # would leave an empty first piece
+
+
 def test_update_document_content(conn):
     doc = db.create_document(conn, "interview_01.txt", "Hello world.")
 

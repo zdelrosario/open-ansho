@@ -1454,13 +1454,25 @@ class MainWindow(QMainWindow):
         self._render_segments_panel()
 
     def _adjust_offsets_for_edit(
-        self, position: int, chars_removed: int, chars_added: int
+        self,
+        position: int,
+        chars_removed: int,
+        chars_added: int,
+        *,
+        inserted_text_is_uncoded: bool = False,
     ) -> None:
         """Remap every stored offset in the current document through one edit.
 
         Called both for a user's insert-mode edit and for the region markers
         this window splices in itself, so `documents.content` is the single
         thing segment and region offsets are ever measured against.
+
+        Text typed into a segment, or at its first character, joins that
+        segment. A region marker spliced in must not, or a new region would
+        start out wearing the codes of whatever span it landed in — so
+        `create_region` passes `inserted_text_is_uncoded=True` (a pure
+        insertion), which pushes a segment starting there along and splits
+        one the insertion falls inside into two pieces around it.
         """
         removed_end = position + chars_removed
         delta = chars_added - chars_removed
@@ -1473,6 +1485,13 @@ class MainWindow(QMainWindow):
             return position  # offset fell inside the replaced span
 
         for segment in db.list_segments_for_document(self.conn, self._current_document_id):
+            if inserted_text_is_uncoded and segment.end_offset > position:
+                if segment.start_offset < position:
+                    _first, segment = db.split_segment(self.conn, segment.id, position, position)
+                db.update_segment_offsets(
+                    self.conn, segment.id, segment.start_offset + delta, segment.end_offset + delta
+                )
+                continue
             new_start = remap(segment.start_offset)
             new_end = remap(segment.end_offset)
             if new_end <= new_start:
@@ -1610,7 +1629,9 @@ class MainWindow(QMainWindow):
         db.update_document_content(
             self.conn, self._current_document_id, self.active_viewer.toPlainText()
         )
-        self._adjust_offsets_for_edit(position, 0, len(pdf_extract.REGION_MARKER_LINE))
+        self._adjust_offsets_for_edit(
+            position, 0, len(pdf_extract.REGION_MARKER_LINE), inserted_text_is_uncoded=True
+        )
         region = db.create_region(
             self.conn,
             self._current_document_id,
