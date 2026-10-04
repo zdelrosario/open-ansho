@@ -29,7 +29,7 @@ PDF_TEXT_TOP = 742  # in PDF user space, measured up from the bottom edge
 PDF_FIGURE_BOX = (50, 400, 300, 160)
 
 
-def _pdf_bytes(pages):
+def _pdf_bytes(pages, strays=None):
     font_number = 3
     page_numbers = [4 + 2 * index for index in range(len(pages))]
     content_numbers = [5 + 2 * index for index in range(len(pages))]
@@ -61,6 +61,11 @@ def _pdf_bytes(pages):
                 text = line.replace("\\", r"\\").replace("(", r"\(").replace(")", r"\)")
                 parts.append(f"({text}) Tj" if line_index == 0 else f"T* ({text}) Tj")
             parts.append("ET")
+        for stray_x, stray_y, text in (strays or [])[index] if strays else ():
+            escaped = text.replace("\\", r"\\").replace("(", r"\(").replace(")", r"\)")
+            parts.append(
+                f"BT /F1 {PDF_FONT_SIZE} Tf {stray_x} {stray_y} Td ({escaped}) Tj ET"
+            )
         x, y, width, height = PDF_FIGURE_BOX
         parts.append(f"0.27 0.51 0.71 rg {x} {y} {width} {height} re f")
         stream = ("\n".join(parts) + "\n").encode()
@@ -91,11 +96,14 @@ def write_pdf():
     """Factory writing a small real PDF: `write_pdf(path, [["line"], ...])`.
 
     One list of text lines per page; every page also carries a filled
-    rectangle standing in for a figure.
+    rectangle standing in for a figure. `strays` adds, per page, text runs
+    at explicit `(x, y, text)` positions in PDF user space (y measured up
+    from the bottom edge), written after the page's lines — which is how to
+    build a page whose extraction order is not simply top to bottom.
     """
 
-    def _write_pdf(path, pages):
-        path.write_bytes(_pdf_bytes(pages))
+    def _write_pdf(path, pages, strays=None):
+        path.write_bytes(_pdf_bytes(pages, strays))
         return path
 
     return _write_pdf

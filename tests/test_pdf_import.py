@@ -68,6 +68,38 @@ def test_page_for_offset(offset, expected_page):
     assert pdf_extract.page_for_offset(content, offset) == expected_page
 
 
+def test_a_character_is_only_ever_as_tall_as_its_own_line(tmp_path, write_pdf):
+    """Regression: a page whose text does not come out top-to-bottom.
+
+    A real journal page emits its margin line numbers after its footer, so
+    the extraction order jumps back *up* the page. Grouping characters into
+    lines by which way that order moves merged the two, and every character
+    in the merged run ended up as tall as the gap between them — so putting
+    the cursor on one covered half the page.
+    """
+    path = write_pdf(
+        tmp_path / "journal.pdf",
+        [["Body line one.", "Body line two."]],
+        strays=[[(50, 47, "footer line here"), (300, 577, "5")]],
+    )
+    source = pdf_extract.PdfPageSource(path.read_bytes())
+
+    heights = [rect.height() for rect in source.char_rects(0) if not rect.isEmpty()]
+
+    assert heights
+    assert max(heights) < 3 * min(heights)
+
+
+def test_characters_on_one_line_are_leveled_to_a_common_height(tmp_path, write_pdf):
+    path = write_pdf(tmp_path / "lines.pdf", [["Agile pygmy."]])
+    source = pdf_extract.PdfPageSource(path.read_bytes())
+
+    # Capitals, x-height letters and descenders all sit in the same band.
+    line = [rect for rect in source.char_rects(0) if not rect.isEmpty()]
+    assert len({round(rect.top()) for rect in line}) == 1
+    assert len({round(rect.height()) for rect in line}) == 1
+
+
 # -- import -------------------------------------------------------------------
 
 

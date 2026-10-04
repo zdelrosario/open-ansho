@@ -174,11 +174,18 @@ class PdfPageSource:
 def _level_rects_by_line(rects: list[QRectF]) -> list[QRectF]:
     """Give every character on a line the same top and height.
 
-    Characters are grouped into lines by looking for a break in the reading
-    order: a rectangle that starts left of the one before it, or well below
-    it, begins a new line. Empty rectangles (spaces, line breaks) inherit the
-    line they fall in, and are given the width of a space so the cursor has
-    something to sit on.
+    Characters are grouped into lines by where they sit: a character joins
+    the line being built if it overlaps that line's vertical extent by more
+    than half its own height, and otherwise starts a new one. Empty
+    rectangles (spaces, line breaks) inherit the line they fall in, and are
+    given the width of a space so the cursor has something to sit on.
+
+    Deciding this by position rather than by reading order matters: a real
+    document's extraction order is not simply top-to-bottom. A journal page
+    whose margin line numbers come out after its footer jumps back *up* the
+    page, and a rule phrased as "a new line starts when the text moves left
+    or down" merges the two — making every character in the merged run as
+    tall as the gap between them, so clicking one covers half the page.
     """
     leveled: list[QRectF] = list(rects)
     line_start = 0
@@ -203,18 +210,31 @@ def _level_rects_by_line(rects: list[QRectF]) -> list[QRectF]:
                 leveled[index] = QRectF(rect.left(), top, rect.width(), bottom - top)
                 previous_right = rect.right()
 
-    previous = None
+    extent: tuple[float, float] | None = None  # the line so far, as (top, bottom)
     for index, rect in enumerate(rects):
         if rect.isEmpty():
             continue  # a space or a line break carries no position of its own
-        if previous is not None and (
-            rect.left() < previous.left() or rect.top() > previous.bottom()
-        ):
+        if extent is not None and not _shares_line(extent, rect):
             finish(line_start, index)
             line_start = index
-        previous = rect
+            extent = None
+        if extent is None:
+            extent = (rect.top(), rect.bottom())
+        else:
+            # Measuring against the line so far, rather than against the
+            # previous character, keeps a run of slightly-drifting
+            # characters from walking the line's extent down the page.
+            extent = (min(extent[0], rect.top()), max(extent[1], rect.bottom()))
     finish(line_start, len(rects))
     return leveled
+
+
+def _shares_line(extent: tuple[float, float], rect: QRectF) -> bool:
+    """Whether `rect` sits on the line currently spanning `extent`."""
+    top, bottom = extent
+    overlap = min(bottom, rect.bottom()) - max(top, rect.top())
+    shorter = min(bottom - top, rect.height())
+    return overlap > 0.5 * shorter if shorter > 0 else overlap > 0
 
 
 def page_ranges(content: str) -> list[tuple[int, int]]:

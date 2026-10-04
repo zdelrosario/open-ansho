@@ -319,6 +319,41 @@ def test_clicking_a_word_puts_the_cursor_there(qtbot, tmp_path, write_pdf):
     assert position < len("First page first line.")
 
 
+def test_clicking_in_a_text_block_covers_one_character_not_a_swathe_of_page(
+    qtbot, tmp_path, write_pdf
+):
+    """Regression: see `test_a_character_is_only_ever_as_tall_as_its_own_line`.
+
+    The user-facing half of it — the cursor is what makes an over-tall
+    character box visible, as a block covering far more than it should.
+    """
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    window.create_project(tmp_path / "project.sqlite")
+    write_pdf(
+        tmp_path / "journal.pdf",
+        [["Body line one.", "Body line two."]],
+        strays=[[(50, 47, "footer line here"), (300, 577, "5")]],
+    )
+    window.import_document(tmp_path / "journal.pdf")
+    window.document_list.setCurrentRow(0)
+    viewer = window.pdf_viewer
+    viewer.viewport().resize(700, 900)
+
+    footer = viewer.toPlainText().index("footer line here")
+    QTest.mouseClick(
+        viewer.viewport(),
+        Qt.LeftButton,
+        Qt.NoModifier,
+        viewport_point(viewer, 0, text_point(viewer, index=footer)),
+    )
+
+    rect = viewer._cursor_rect()
+    assert viewer.textCursor().position() == footer
+    assert rect.height() < 0.05 * viewer.page_rect(0).height()
+
+
 def test_dragging_across_words_selects_them(qtbot, tmp_path, write_pdf):
     window = open_pdf(qtbot, tmp_path, write_pdf)
     viewer = window.pdf_viewer
