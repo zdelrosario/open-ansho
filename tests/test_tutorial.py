@@ -9,23 +9,34 @@ def test_tutorial_text_ships_with_the_package():
     assert text.strip()
 
 
-def test_tutorial_project_holds_only_the_tutorial_document():
+def test_tutorial_project_holds_only_the_tutorial_documents():
     conn = tutorial.open_tutorial_project()
 
     documents = db.list_documents(conn)
-    assert [doc.name for doc in documents] == [tutorial.DOCUMENT_NAME]
+    assert [doc.name for doc in documents] == list(tutorial.DOCUMENT_NAMES)
     assert documents[0].content == tutorial.read_tutorial_text()
+    assert not documents[0].is_pdf
     assert db.list_codes(conn) == []
 
 
-def test_open_tutorial_project_selects_the_document(qtbot):
+def test_tutorial_pdf_is_a_pdf_document():
+    conn = tutorial.open_tutorial_project()
+
+    pdf = db.get_document_by_name(conn, tutorial.PDF_DOCUMENT_NAME)
+    assert pdf is not None
+    assert pdf.is_pdf
+    assert pdf.source_data == tutorial.tutorial_pdf_path().read_bytes()
+    assert pdf.content.strip()
+
+
+def test_open_tutorial_project_selects_the_introduction(qtbot):
     window = MainWindow()
     qtbot.addWidget(window)
 
     window.open_tutorial_project()
 
     assert window.conn is not None
-    assert window.document_list.count() == 1
+    assert window.document_list.count() == len(tutorial.DOCUMENT_NAMES)
     assert window.document_list.currentItem() is not None
     assert window._current_document_id is not None
     assert window.viewer.toPlainText() == tutorial.read_tutorial_text()
