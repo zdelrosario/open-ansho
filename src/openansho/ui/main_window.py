@@ -65,6 +65,12 @@ JSON_FILTER = "JSON Files (*.json)"
 PROJECT_SECTION_LABEL_OPEN = "Project"
 PROJECT_SECTION_LABEL_CLOSED = "Project (first open a project)"
 
+IMPORT_LABEL = "&Import Document…"
+# The tutorial lives only in memory (see `tutorial.open_tutorial_project`), so
+# anything imported into it would vanish on close; point the user at a real
+# project instead.
+IMPORT_LABEL_TUTORIAL = "Import Document (create a new project to import files)"
+
 TUTORIAL_PROJECT_NAME = "Tutorial"
 TUTORIAL_STATUS_MESSAGE = "Tutorial project — nothing you do here is saved"
 
@@ -560,7 +566,7 @@ class MainWindow(QMainWindow):
         self.project_section_action.setEnabled(False)
         file_menu.addAction(self.project_section_action)
 
-        self.import_action = QAction("&Import Document…", self)
+        self.import_action = QAction(IMPORT_LABEL, self)
         self.import_action.triggered.connect(self._on_import_document)
         file_menu.addAction(self.import_action)
 
@@ -2421,7 +2427,9 @@ class MainWindow(QMainWindow):
 
     def _update_actions_enabled(self) -> None:
         has_project = self.conn is not None
-        self.import_action.setEnabled(has_project)
+        in_tutorial = has_project and self.project_path is None
+        self.import_action.setEnabled(has_project and not in_tutorial)
+        self.import_action.setText(IMPORT_LABEL_TUTORIAL if in_tutorial else IMPORT_LABEL)
         self.export_csv_action.setEnabled(has_project)
         self.export_json_action.setEnabled(has_project)
         self.export_code_frequency_menu.setEnabled(has_project)

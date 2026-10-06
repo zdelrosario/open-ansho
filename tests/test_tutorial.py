@@ -40,7 +40,21 @@ def test_open_tutorial_project_selects_the_introduction(qtbot):
     assert window.document_list.currentItem() is not None
     assert window._current_document_id is not None
     assert window.viewer.toPlainText() == tutorial.read_tutorial_text()
+
+
+def test_import_is_disabled_in_the_tutorial(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    window.open_tutorial_project()
+
+    assert not window.import_action.isEnabled()
+    assert "create a new project" in window.import_action.text()
+
+    window.create_project(tmp_path / "real.sqlite")
+
     assert window.import_action.isEnabled()
+    assert "create a new project" not in window.import_action.text()
 
 
 def test_tutorial_project_is_not_a_file_or_a_recent_project(qtbot):
