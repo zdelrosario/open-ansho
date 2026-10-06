@@ -76,6 +76,14 @@ TUTORIAL_STATUS_MESSAGE = "Tutorial project — nothing you do here is saved"
 
 NO_USERNAME_TEXT = "(NO USERNAME)"
 
+# Insert mode edits the document itself, so its status-bar notice is painted
+# red to stand out from the other (unhighlighted) mode notices. Same in both
+# themes: white on this red reads on a light or a dark status bar.
+INSERT_MODE_LABEL_STYLE = (
+    "background-color: #d32f2f; color: white; font-weight: bold; "
+    "border-radius: 3px; padding: 0 4px;"
+)
+
 SETTINGS_ORGANIZATION = "OpenAnsho"
 SETTINGS_APPLICATION = "OpenAnsho"
 RECENT_PROJECTS_KEY = "recentProjects"
@@ -783,6 +791,9 @@ class MainWindow(QMainWindow):
             self.vim_mode_label.setText("-- INSERT --")
         else:
             self.vim_mode_label.setText("")
+        self.vim_mode_label.setStyleSheet(
+            INSERT_MODE_LABEL_STYLE if mode == VimTextViewer.INSERT else ""
+        )
         self.insert_mode_button.blockSignals(True)
         self.insert_mode_button.setChecked(mode == VimTextViewer.INSERT)
         self.insert_mode_button.blockSignals(False)
