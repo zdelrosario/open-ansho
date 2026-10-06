@@ -4,7 +4,7 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QLineEdit
 
 from openansho import db
-from openansho.ui.main_window import MainWindow
+from openansho.ui.main_window import INSERT_MODE_LABEL_STYLE, MainWindow
 from openansho.ui.vim_viewer import VimTextViewer
 
 
@@ -590,12 +590,14 @@ def test_i_enters_insert_mode_and_shows_label(qtbot, tmp_path):
 
     assert window.viewer.mode == VimTextViewer.INSERT
     assert window.vim_mode_label.text() == "-- INSERT --"
+    assert window.vim_mode_label.styleSheet() == INSERT_MODE_LABEL_STYLE
     assert window.insert_mode_button.isChecked()
 
     QTest.keyClick(window.viewer, Qt.Key_Escape)
 
     assert window.viewer.mode == VimTextViewer.NORMAL
     assert window.vim_mode_label.text() == ""
+    assert window.vim_mode_label.styleSheet() == ""
     assert not window.insert_mode_button.isChecked()
 
 
