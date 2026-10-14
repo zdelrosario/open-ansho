@@ -84,6 +84,17 @@ INSERT_MODE_LABEL_STYLE = (
     "border-radius: 3px; padding: 0 4px;"
 )
 
+# The blue of a focused pane's outline, reused wherever the window marks some
+# other piece of state, so "blue" consistently means "this is where you are".
+FOCUS_COLOR = "#3399ff"
+
+# Visual mode's status-bar notice, painted in the focus blue so it stands out
+# like the insert-mode notice does, without the red's "you are editing" alarm.
+VISUAL_MODE_LABEL_STYLE = (
+    f"background-color: {FOCUS_COLOR}; color: white; font-weight: bold; "
+    "border-radius: 3px; padding: 0 4px;"
+)
+
 SETTINGS_ORGANIZATION = "OpenAnsho"
 SETTINGS_APPLICATION = "OpenAnsho"
 RECENT_PROJECTS_KEY = "recentProjects"
@@ -152,17 +163,20 @@ CODE_SORT_OPTIONS = [
     (CODE_SORT_ALL_DOCUMENTS, "Segments in All Documents"),
 ]
 
-PANE_FOCUS_STYLE = """
+PANE_FOCUS_STYLE = f"""
 QListWidget#documentPane, QPlainTextEdit#viewerPane,
-QTreeWidget#codeTreePane, QListWidget#segmentListPane {
+QTreeWidget#codeTreePane, QListWidget#segmentListPane {{
     border: 2px solid transparent;
-}
+}}
 QListWidget#documentPane[focused="true"],
 QPlainTextEdit#viewerPane[focused="true"],
 QTreeWidget#codeTreePane[focused="true"],
-QListWidget#segmentListPane[focused="true"] {
-    border: 2px solid #3399ff;
-}
+QListWidget#segmentListPane[focused="true"] {{
+    border: 2px solid {FOCUS_COLOR};
+}}
+QLineEdit#codeFilterInput:focus {{
+    background-color: {FOCUS_COLOR};
+}}
 """
 
 DARK_THEME_STYLE = """
@@ -339,6 +353,7 @@ class MainWindow(QMainWindow):
         self.code_sort_combo.currentIndexChanged.connect(self._on_code_sort_changed)
 
         self.code_filter_input = CodeFilterLineEdit()
+        self.code_filter_input.setObjectName("codeFilterInput")
         self.code_filter_input.setPlaceholderText("Filter codes, or type a new name and press Enter…")
         self.code_filter_input.textChanged.connect(self._on_code_filter_changed)
         self.code_filter_input.returnPressed.connect(self._on_code_filter_return_pressed)
@@ -791,9 +806,12 @@ class MainWindow(QMainWindow):
             self.vim_mode_label.setText("-- INSERT --")
         else:
             self.vim_mode_label.setText("")
-        self.vim_mode_label.setStyleSheet(
-            INSERT_MODE_LABEL_STYLE if mode == VimTextViewer.INSERT else ""
-        )
+        if mode == VimTextViewer.INSERT:
+            self.vim_mode_label.setStyleSheet(INSERT_MODE_LABEL_STYLE)
+        elif mode == VimTextViewer.VISUAL:
+            self.vim_mode_label.setStyleSheet(VISUAL_MODE_LABEL_STYLE)
+        else:
+            self.vim_mode_label.setStyleSheet("")
         self.insert_mode_button.blockSignals(True)
         self.insert_mode_button.setChecked(mode == VimTextViewer.INSERT)
         self.insert_mode_button.blockSignals(False)
