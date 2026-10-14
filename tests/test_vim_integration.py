@@ -4,7 +4,11 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QLineEdit
 
 from openansho import db
-from openansho.ui.main_window import INSERT_MODE_LABEL_STYLE, MainWindow
+from openansho.ui.main_window import (
+    INSERT_MODE_LABEL_STYLE,
+    VISUAL_MODE_LABEL_STYLE,
+    MainWindow,
+)
 from openansho.ui.vim_viewer import VimTextViewer
 
 
@@ -575,6 +579,27 @@ def test_f_target_char_space_does_not_shift_focus_to_code_filter(qtbot, tmp_path
 
     assert window.viewer.textCursor().position() == 5
     assert window.viewer.hasFocus()
+
+
+def test_v_enters_visual_mode_and_highlights_label(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    _open_project_with_document(window, tmp_path)
+
+    window.viewer.setFocus()
+    qtbot.waitUntil(lambda: window.viewer.hasFocus())
+
+    QTest.keyClick(window.viewer, Qt.Key_V)
+
+    assert window.viewer.mode == VimTextViewer.VISUAL
+    assert window.vim_mode_label.text() == "-- VISUAL --"
+    assert window.vim_mode_label.styleSheet() == VISUAL_MODE_LABEL_STYLE
+
+    QTest.keyClick(window.viewer, Qt.Key_Escape)
+
+    assert window.viewer.mode == VimTextViewer.NORMAL
+    assert window.vim_mode_label.styleSheet() == ""
 
 
 def test_i_enters_insert_mode_and_shows_label(qtbot, tmp_path):
