@@ -117,6 +117,7 @@ class PdfViewer(VimTextNavigation, QAbstractScrollArea):
 
     modeChanged = Signal(str)
     searchTextChanged = Signal(str)
+    searchMatchChanged = Signal(int, int)  # 1-based match index, match total
     contentEdited = Signal(int, int, int)  # never emitted; a PDF has no insert mode
     cursorPositionChanged = Signal()
     selectionChanged = Signal()

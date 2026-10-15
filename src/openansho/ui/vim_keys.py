@@ -14,7 +14,7 @@ A host must be a QWidget that provides:
 - `_visible_line_starts()`, `_scroll_current_line_to_top()`,
   `_scroll_current_line_to_bottom()` and `_scroll_viewport_lines(delta)` —
   the motions whose meaning depends on how the pane lays its content out.
-- `modeChanged` and `searchTextChanged` signals. They are declared on each
+- `modeChanged`, `searchTextChanged` and `searchMatchChanged` signals. They are declared on each
   host rather than here because PySide only registers a Signal declared on a
   QObject subclass.
 - `_on_insert_mode_changed(entering)`, called when the mode changes, for
@@ -360,6 +360,7 @@ class VimTextNavigation:
             cursor = self.textCursor()
             cursor.setPosition(self._search_origin)
             self.setTextCursor(cursor)
+        self._report_search_match(self._search_buffer, match)
 
     def _commit_search(self) -> None:
         regex = self._compile_search_pattern(self._search_buffer)
@@ -371,6 +372,9 @@ class VimTextNavigation:
                 cursor.setPosition(match.start())
                 self.setTextCursor(cursor)
                 self.ensureCursorVisible()
+            self._report_search_match(self._search_pattern, match)
+        else:
+            self._report_search_match(self._search_pattern, None)
         # Re-emit the actually-committed pattern, discarding an empty or
         # invalid-regex draft rather than leaving it displayed as if saved.
         self.searchTextChanged.emit(self._search_pattern)
@@ -381,6 +385,7 @@ class VimTextNavigation:
         cursor.setPosition(self._search_origin)
         self.setTextCursor(cursor)
         self.searchTextChanged.emit(self._search_pattern)
+        self._report_search_match(self._search_pattern, None)
         self._exit_search_mode()
 
     def _exit_search_mode(self) -> None:
@@ -404,6 +409,27 @@ class VimTextNavigation:
             return
         self._enter_visual_mode()
         self._select_match(match)
+        self._report_search_match(self._search_pattern, match)
+
+    def refresh_search_status(self) -> None:
+        """Re-announce the committed search and its match count, for a host
+        whose content was just replaced (a new document)."""
+        self.searchTextChanged.emit(self._search_pattern)
+        self._report_search_match(self._search_pattern, None)
+
+    def _report_search_match(self, pattern: str, match: re.Match | None) -> None:
+        """Emit `searchMatchChanged(index, total)` for `match` among all of
+        `pattern`'s matches. index is 1-based, and 0 when the cursor isn't on
+        one of them; `(-1, -1)` means there is no pattern, so no count at all.
+        An invalid regex counts as a pattern with no matches.
+        """
+        if not pattern:
+            self.searchMatchChanged.emit(-1, -1)
+            return
+        regex = self._compile_search_pattern(pattern)
+        starts = [m.start() for m in regex.finditer(self.toPlainText())] if regex else []
+        index = starts.index(match.start()) + 1 if match is not None else 0
+        self.searchMatchChanged.emit(index, len(starts))
 
     def _select_match(self, match: re.Match) -> None:
         cursor = self.textCursor()

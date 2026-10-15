@@ -95,6 +95,13 @@ VISUAL_MODE_LABEL_STYLE = (
     "border-radius: 3px; padding: 0 4px;"
 )
 
+# Search mode's status-bar notice, painted green so each of the three
+# non-normal modes reads at a glance by its color alone.
+SEARCH_MODE_LABEL_STYLE = (
+    "background-color: #2e7d32; color: white; font-weight: bold; "
+    "border-radius: 3px; padding: 0 4px;"
+)
+
 SETTINGS_ORGANIZATION = "OpenAnsho"
 SETTINGS_APPLICATION = "OpenAnsho"
 RECENT_PROJECTS_KEY = "recentProjects"
@@ -303,6 +310,7 @@ class MainWindow(QMainWindow):
         self.viewer.cursorPositionChanged.connect(self._on_viewer_cursor_moved)
         self.viewer.modeChanged.connect(self._on_viewer_mode_changed)
         self.viewer.searchTextChanged.connect(self._on_viewer_search_text_changed)
+        self.viewer.searchMatchChanged.connect(self._on_viewer_search_match_changed)
         self.viewer.contentEdited.connect(self._on_viewer_content_edited)
         self.viewer.setContextMenuPolicy(Qt.CustomContextMenu)
         self.viewer.customContextMenuRequested.connect(self._on_viewer_context_menu)
@@ -315,6 +323,7 @@ class MainWindow(QMainWindow):
         self.pdf_viewer.cursorPositionChanged.connect(self._on_viewer_cursor_moved)
         self.pdf_viewer.modeChanged.connect(self._on_viewer_mode_changed)
         self.pdf_viewer.searchTextChanged.connect(self._on_viewer_search_text_changed)
+        self.pdf_viewer.searchMatchChanged.connect(self._on_viewer_search_match_changed)
         self.pdf_viewer.regionDrawn.connect(self._on_region_drawn)
         self.pdf_viewer.regionClicked.connect(self._on_region_clicked)
         self.pdf_viewer.regionContextMenuRequested.connect(self._on_region_context_menu)
@@ -446,6 +455,9 @@ class MainWindow(QMainWindow):
 
         self.search_label = QLabel()
         self.statusBar().addPermanentWidget(self.search_label)
+
+        self.search_match_label = QLabel()
+        self.statusBar().addPermanentWidget(self.search_match_label)
 
         self._apply_theme()
         self._panes = (
@@ -784,6 +796,7 @@ class MainWindow(QMainWindow):
             self._current_document_id = None
             self._load_pdf_pane(None)
             self.active_viewer.clear()
+            self.active_viewer.refresh_search_status()
             self.active_viewer.set_code_highlights([])
             self._refresh_codes()
             self._on_viewer_cursor_moved()
@@ -795,6 +808,8 @@ class MainWindow(QMainWindow):
         # and the content has to go into that one.
         self._load_pdf_pane(doc)
         self.active_viewer.setPlainText(doc.content if doc else "")
+        # A match count belongs to the document it was counted in.
+        self.active_viewer.refresh_search_status()
         self._refresh_highlights()
         self._refresh_codes()
         self._on_viewer_cursor_moved()
@@ -812,6 +827,8 @@ class MainWindow(QMainWindow):
             self.vim_mode_label.setStyleSheet(INSERT_MODE_LABEL_STYLE)
         elif mode == VimTextViewer.VISUAL:
             self.vim_mode_label.setStyleSheet(VISUAL_MODE_LABEL_STYLE)
+        elif mode == VimTextViewer.SEARCH:
+            self.vim_mode_label.setStyleSheet(SEARCH_MODE_LABEL_STYLE)
         else:
             self.vim_mode_label.setStyleSheet("")
         self.insert_mode_button.blockSignals(True)
@@ -827,6 +844,13 @@ class MainWindow(QMainWindow):
 
     def _on_viewer_search_text_changed(self, text: str) -> None:
         self.search_label.setText(f"/{text}" if text else "")
+
+    def _on_viewer_search_match_changed(self, index: int, total: int) -> None:
+        if total < 0:
+            self.search_match_label.setText("")
+        else:
+            # "x" when the cursor isn't on a match, as when there are none.
+            self.search_match_label.setText(f"{index or 'x'}/{total}")
 
     def _update_line_position_label(self) -> None:
         total_lines = self.active_viewer.document().blockCount()
