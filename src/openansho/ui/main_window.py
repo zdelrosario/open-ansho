@@ -165,11 +165,13 @@ CODE_SORT_OPTIONS = [
 
 PANE_FOCUS_STYLE = f"""
 QListWidget#documentPane, QPlainTextEdit#viewerPane,
+QAbstractScrollArea#pdfViewerPane,
 QTreeWidget#codeTreePane, QListWidget#segmentListPane {{
     border: 2px solid transparent;
 }}
 QListWidget#documentPane[focused="true"],
 QPlainTextEdit#viewerPane[focused="true"],
+QAbstractScrollArea#pdfViewerPane[focused="true"],
 QTreeWidget#codeTreePane[focused="true"],
 QListWidget#segmentListPane[focused="true"] {{
     border: 2px solid {FOCUS_COLOR};
