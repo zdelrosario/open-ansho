@@ -1,0 +1,23 @@
+This tutorial is about navigating in OpenAnsho, particularly, how to use keyboard shortcuts.
+
+
+
+First, press your Escape key. Notice that the middle (document) pane is now highlighted in blue. This indicates which part of the application is currently selected.
+
+Any time you want to return to a predictable state, try pressing Escape a couple times. This will return you to normal mode and select the document pane.
+
+Next, let's try navigating through the text. First, click inside this paragraph and then press your "0" key. Press your "l" key a few times to move the cursor forward. Press your "h" key to move the cursor backward. Press "j" and "k" to move up and down by a full line. Press "0" to move to the beginning of a line, and "$" (Shift + 4) to move to the end of a line. Use these shortcuts to move around quickly.
+
+This kind of movement is useful when combined with visual selection. Navigate to the start of this line, then press your "v" key. Then, navigate to the end of the line. Press your Spacebar, and notice that focus shifts to the text field in the Codebook. You can type a new code, or search for an existing code by name. Press Escape twice: The first time will return focus to the document pane. The second time will exit visual mode. This quick-coding functionality---using keyboard shortcuts to navigate, select, and apply codes---is what enable you to code quickly in OpenAnsho.
+
+Using keyboard shortcuts alone: (Code this segment as [code].) (Code this segment as [call].) (Code this segment as [test].) Next, select (this text), then press your Spacebar, followed by the "c" key. Note that this filters the codebook to matching codes. You can use the up and down arrows to select which code to apply, then press Enter to apply the code. If you change your mind when quick-coding, simply press Escape twice to return to the document pane and normal mode.
+
+Now, let's talk about some more advanced navigation shortcuts. Navigate to the start of this line, then press the "f" key, followed by the period "." key. Notice that your cursor jumps forward to the next period. You can also press "Shift + f" to search backward by character. This is a useful way to navigate by sentences. You can also use "f" with other characters to search for any specific character. This kind of navigation works with visual mode: Try moving to the beginning of this line, enter visual mode (press "v"), then navigate forward to the next period. This is a quick way to code entire sentences.
+
+You can also navigate by entire words: "w" navigates to the start of the next word, "b" navigates to the start of the previous word, and "e" navigates to the end of the next word. You can use Shift with these word navigation shortcuts to include punctuation. Combined with visual mode, this is a quick way to code sentence fragments. Try (coding) the (parenthetical segments) of this sentence with a few (made-up codes).
+
+You can also search by longer strings, like words or phrases. Press your slash "/" key to enter search mode: In this mode, you type text to use in the search, then press Enter to confirm the search. With a search term confirmed, you can press "n" to search forward, and "Shift + n" to search backward. Try searching for the term "code".
+
+You can also use "c" and "Shift + c" to search forward and backward by coded segment. As always, if you are in the middle of entering a search string and change your mind, you can press Escape to cancel and return to normal mode.
+
+There are more keyboard shortcuts. To see a list of all shortcuts, press the "?" key ("Shift + /") to list all shortcuts.

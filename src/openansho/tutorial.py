@@ -16,8 +16,9 @@ from openansho import db
 
 DOCUMENT_NAME = "01 Introduction.txt"
 PDF_DOCUMENT_NAME = "02 PDF Coding.pdf"
+NAVIGATION_DOCUMENT_NAME = "03 Navigation.txt"
 # Every file the tutorial ships, in the order the documents are listed.
-DOCUMENT_NAMES = (DOCUMENT_NAME, PDF_DOCUMENT_NAME)
+DOCUMENT_NAMES = (DOCUMENT_NAME, PDF_DOCUMENT_NAME, NAVIGATION_DOCUMENT_NAME)
 
 
 def tutorial_file_path(name: str) -> Path:
@@ -58,5 +59,10 @@ def open_tutorial_project() -> sqlite3.Connection:
         pdf_extract.pdf_text(pdf_data, PDF_DOCUMENT_NAME),
         kind=db.DOCUMENT_KIND_PDF,
         source_data=pdf_data,
+    )
+    db.create_document(
+        conn,
+        NAVIGATION_DOCUMENT_NAME,
+        tutorial_file_path(NAVIGATION_DOCUMENT_NAME).read_text(encoding="utf-8"),
     )
     return conn
