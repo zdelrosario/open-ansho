@@ -64,6 +64,7 @@ class VimTextViewer(VimTextNavigation, QPlainTextEdit):
 
     modeChanged = Signal(str)
     searchTextChanged = Signal(str)
+    searchMatchChanged = Signal(int, int)  # 1-based match index, match total
     contentEdited = Signal(int, int, int)  # position, charsRemoved, charsAdded
 
     def __init__(self, parent=None) -> None:

@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QLineEdit
 from openansho import db
 from openansho.ui.main_window import (
     INSERT_MODE_LABEL_STYLE,
+    SEARCH_MODE_LABEL_STYLE,
     VISUAL_MODE_LABEL_STYLE,
     MainWindow,
 )
@@ -497,6 +498,73 @@ def test_escape_during_search_reverts_the_persisted_search_label(qtbot, tmp_path
 
     assert window.vim_mode_label.text() == ""
     assert window.search_label.text() == "/wor"  # reverts to the last committed pattern
+
+
+def test_search_mode_label_is_green_while_searching(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    _open_project_with_document(window, tmp_path, "Hello frustrating world.")
+
+    window.viewer.setFocus()
+    qtbot.waitUntil(lambda: window.viewer.hasFocus())
+
+    QTest.keyClick(window.viewer, Qt.Key_Slash)
+    assert window.vim_mode_label.styleSheet() == SEARCH_MODE_LABEL_STYLE
+
+    QTest.keyClick(window.viewer, Qt.Key_Escape)
+    assert window.vim_mode_label.styleSheet() == ""
+
+
+def test_search_shows_current_match_index_and_total(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    _open_project_with_document(window, tmp_path, "one cat, two cat, three cat.")
+
+    window.viewer.setFocus()
+    qtbot.waitUntil(lambda: window.viewer.hasFocus())
+
+    QTest.keyClick(window.viewer, Qt.Key_Slash)
+    QTest.keyClicks(window.viewer, "ca")
+    assert window.search_match_label.text() == "1/3"  # live while typing
+
+    QTest.keyClicks(window.viewer, "z")
+    assert window.search_match_label.text() == "x/0"
+
+    QTest.keyClick(window.viewer, Qt.Key_Backspace)
+    QTest.keyClick(window.viewer, Qt.Key_Return)
+    assert window.search_match_label.text() == "1/3"
+
+    QTest.keyClick(window.viewer, Qt.Key_N)
+    assert window.search_match_label.text() == "2/3"
+    QTest.keyClick(window.viewer, Qt.Key_N)
+    assert window.search_match_label.text() == "3/3"
+    QTest.keyClick(window.viewer, Qt.Key_N)
+    assert window.search_match_label.text() == "1/3"  # wraps around
+    QTest.keyClick(window.viewer, Qt.Key_N, Qt.ShiftModifier)
+    assert window.search_match_label.text() == "3/3"
+
+    QTest.keyClick(window.viewer, Qt.Key_Escape)
+    QTest.keyClick(window.viewer, Qt.Key_Slash)
+    QTest.keyClick(window.viewer, Qt.Key_Escape)
+    assert window.search_match_label.text() == "x/3"  # count stays after cancelling
+
+
+def test_search_with_no_matches_shows_x_of_zero(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    _open_project_with_document(window, tmp_path, "Hello frustrating world.")
+
+    window.viewer.setFocus()
+    qtbot.waitUntil(lambda: window.viewer.hasFocus())
+
+    assert window.search_match_label.text() == ""  # no pattern yet
+    QTest.keyClick(window.viewer, Qt.Key_Slash)
+    QTest.keyClicks(window.viewer, "zebra")
+    QTest.keyClick(window.viewer, Qt.Key_Return)
+    assert window.search_match_label.text() == "x/0"
 
 
 def test_space_while_searching_is_added_to_the_pattern_instead_of_shifting_focus(qtbot, tmp_path):
