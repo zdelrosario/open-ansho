@@ -29,6 +29,17 @@ def test_tutorial_pdf_is_a_pdf_document():
     assert pdf.content.strip()
 
 
+def test_tutorial_navigation_is_a_text_document():
+    conn = tutorial.open_tutorial_project()
+
+    doc = db.get_document_by_name(conn, tutorial.NAVIGATION_DOCUMENT_NAME)
+    assert doc is not None
+    assert not doc.is_pdf
+    assert doc.content == tutorial.tutorial_file_path(
+        tutorial.NAVIGATION_DOCUMENT_NAME
+    ).read_text(encoding="utf-8")
+
+
 def test_open_tutorial_project_selects_the_introduction(qtbot):
     window = MainWindow()
     qtbot.addWidget(window)
