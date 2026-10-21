@@ -338,6 +338,30 @@ def _join_runs(boxes: tuple[QRectF, ...]) -> list[QRectF]:
     return joined
 
 
+def _united(rects) -> QRectF:
+    united = QRectF(rects[0])
+    for rect in rects[1:]:
+        united = united.united(rect)
+    return united
+
+
+def _close_line_gaps(bands: list[QRectF]) -> None:
+    """Stretch consecutive lines' bands, in place, to meet halfway across the gap.
+
+    Only a gap narrow enough to be the leading within a paragraph — the
+    same reach `PdfPageSource.text_zones` gives a line — so the space
+    between paragraphs, or between a page's lines and a stray caption,
+    stays unselected-looking.
+    """
+    for upper, lower in zip(bands, bands[1:]):
+        gap = lower.top() - upper.bottom()
+        reach = min(upper.height(), lower.height()) * TEXT_ZONE_PADDING_Y * 2
+        if 0 < gap <= reach:
+            middle = upper.bottom() + gap / 2
+            upper.setBottom(middle)
+            lower.setTop(middle)
+
+
 def _line_spans(raw: str) -> list[tuple[int, int]]:
     """The [start, end) of each line of `raw`, excluding the line breaks."""
     spans = []
@@ -419,6 +443,7 @@ class PdfTextMap:
         # hold good across scrolling and zooming. A new map is built whenever
         # the content changes, which is what empties this.
         self._range_cache: dict[tuple[int, int], list[tuple[int, QRectF]]] = {}
+        self._selection_cache: dict[tuple[int, int], list[tuple[int, QRectF]]] = {}
 
     @property
     def page_count(self) -> int:
@@ -463,6 +488,49 @@ class PdfTextMap:
                 (page, rect) for rect in self._source.range_rects(page, first, last)
             )
         self._range_cache[(start, end)] = rects
+        return rects
+
+    def selection_rects(self, start: int, end: int) -> list[tuple[int, QRectF]]:
+        """One solid rectangle per line of text in [start, end).
+
+        How a selection is drawn, to look the way it does in the text pane:
+        a band the height of the line, spanning from the first selected
+        character on it to the last, with consecutive lines of a paragraph
+        meeting rather than leaving a stripe of page between them. The runs
+        `rects_for_range` returns can't be painted as they are — a PDF that
+        places its words, or its letters, one at a time comes back as a box
+        per word or letter, each hugging its own glyphs.
+        """
+        cached = self._selection_cache.get((start, end))
+        if cached is not None:
+            return cached
+        by_page: dict[int, list[QRectF]] = {}
+        for page, rect in self.rects_for_range(start, end):
+            by_page.setdefault(page, []).append(rect)
+
+        rects: list[tuple[int, QRectF]] = []
+        for page, runs in by_page.items():
+            bands = []
+            for line in self._source.page_lines(page):
+                extent = _united(line.boxes)
+                on_line = [
+                    run
+                    for run in runs
+                    if extent.top() <= run.center().y() <= extent.bottom()
+                    and run.right() >= extent.left()
+                    and run.left() <= extent.right()
+                ]
+                if not on_line:
+                    continue
+                runs = [run for run in runs if run not in on_line]
+                covered = _united(on_line)
+                bands.append(
+                    QRectF(covered.left(), extent.top(), covered.width(), extent.height())
+                )
+            bands.extend(runs)  # anything no line claimed, drawn as it came
+            _close_line_gaps(bands)
+            rects.extend((page, band) for band in bands)
+        self._selection_cache[(start, end)] = rects
         return rects
 
     def offset_at(self, page: int, point: QPointF) -> int:

@@ -107,6 +107,32 @@ def test_characters_on_one_line_are_leveled_to_a_common_height(tmp_path, write_p
     assert len({round(rect.height()) for rect in rects}) == 1
 
 
+def test_a_selection_is_one_solid_band_per_line(tmp_path, write_pdf):
+    """Words placed one at a time still select as a block, not word by word.
+
+    The engine returns one box per separately placed run, each hugging its
+    own glyphs; painting those made a selection look like a scatter of
+    highlighted letters instead of the text pane's solid lines.
+    """
+    path = write_pdf(
+        tmp_path / "spaced.pdf",
+        [[]],
+        strays=[[(50, 600, "Spaced"), (120, 600, "out"), (160, 600, "words"),
+                 (50, 586, "next"), (90, 586, "line")]],
+    )
+    source = pdf_extract.PdfPageSource(path.read_bytes())
+    content = pdf_extract.read_pdf_text(path)
+    text_map = pdf_extract.PdfTextMap(content, source)
+    assert len(source.range_rects(0, 0, len(source.raw_page_text(0)))) == 5
+
+    rects = [rect for _page, rect in text_map.selection_rects(0, len(content))]
+
+    assert len(rects) == 2
+    first, second = rects
+    assert first.left() < 60 and first.right() > 190  # across the gaps between words
+    assert first.bottom() == second.top()  # the lines meet, no stripe between
+
+
 # -- import -------------------------------------------------------------------
 
 

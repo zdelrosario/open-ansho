@@ -729,7 +729,7 @@ class PdfViewer(VimTextNavigation, QAbstractScrollArea):
         if self._text_map is None or not self._cursor.hasSelection():
             return
         start, end = self._cursor.selectionStart(), self._cursor.selectionEnd()
-        for page, rect in self._text_map.rects_for_range(start, end):
+        for page, rect in self._text_map.selection_rects(start, end):
             painter.fillRect(self.from_page_rect(page, rect), TEXT_SELECTION_COLOR)
 
     def _paint_cursor(self, painter: QPainter) -> None:
