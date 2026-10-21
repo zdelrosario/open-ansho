@@ -48,6 +48,16 @@ PAGE_SEPARATOR = "\f\n"
 REGION_MARKER = "▭"
 REGION_MARKER_LINE = REGION_MARKER + "\n"
 
+# How far around its glyphs a line of text reaches for a press, in multiples
+# of the height of its runs (see `PdfPageSource.text_zones`): runs of one
+# line closer than JOIN are one stretch of text, and each stretch is padded
+# by the two PADDINGs. A run's box hugs the glyphs — about three quarters of
+# the font size — so a full height above and below is what it takes to
+# close the leading of double-spaced text.
+TEXT_ZONE_JOIN = 2.0
+TEXT_ZONE_PADDING_X = 0.5
+TEXT_ZONE_PADDING_Y = 1.0
+
 
 def read_pdf_text(path: Path) -> str:
     """Extract `path`'s text, pages separated by `PAGE_SEPARATOR`."""
@@ -124,6 +134,7 @@ class PdfPageSource:
             raise DocumentReadError(f"Could not read {name} as a PDF.")
         self._normalized: dict[int, tuple[str, list[int]]] = {}
         self._page_lines: dict[int, list[TextLine]] = {}
+        self._text_zones: dict[int, list[QRectF]] = {}
         self._char_rects: dict[tuple[int, int], QRectF | None] = {}
 
     @property
@@ -235,8 +246,35 @@ class PdfPageSource:
         return min(line.start + low, line.end - 1)
 
     def is_over_text(self, page: int, point: QPointF) -> bool:
-        """Whether `point` lands on a line of text on `page`."""
-        return self._run_at(page, point) is not None
+        """Whether `point` lands within the text of `page`.
+
+        Measured against `text_zones` rather than the bare runs, so a press
+        in the gap between two lines or two words still counts as on the
+        text — only a press clear of it starts a region.
+        """
+        return any(zone.contains(point) for zone in self.text_zones(page))
+
+    def text_zones(self, page: int) -> list[QRectF]:
+        """The areas of `page` a press counts as being on the text.
+
+        A run's rectangle hugs its glyphs, leaving thin gaps between lines
+        and between the runs of one line that read as text to the eye. Each
+        line's runs are joined across gaps narrower than `TEXT_ZONE_JOIN`
+        line heights, then padded by `TEXT_ZONE_PADDING_X`/`_Y` — enough to
+        close the leading of single- and double-spaced text without
+        reaching across a column gutter.
+        """
+        if page in self._text_zones:
+            return self._text_zones[page]
+
+        zones = []
+        for line in self.page_lines(page):
+            for zone in _join_runs(line.boxes):
+                pad_x = zone.height() * TEXT_ZONE_PADDING_X
+                pad_y = zone.height() * TEXT_ZONE_PADDING_Y
+                zones.append(zone.adjusted(-pad_x, -pad_y, pad_x, pad_y))
+        self._text_zones[page] = zones
+        return zones
 
     def _run_at(self, page: int, point: QPointF) -> tuple[TextLine, QRectF] | None:
         for line in self.page_lines(page):
@@ -284,6 +322,20 @@ class TextLine:
             if overlap > best_overlap:
                 best, best_overlap = box, overlap
         return best
+
+
+def _join_runs(boxes: tuple[QRectF, ...]) -> list[QRectF]:
+    """A line's runs, with neighbors closer than `TEXT_ZONE_JOIN` united."""
+    joined: list[QRectF] = []
+    for box in sorted(boxes, key=QRectF.left):
+        if joined:
+            last = joined[-1]
+            reach = max(last.height(), box.height()) * TEXT_ZONE_JOIN
+            if box.left() - last.right() < reach:
+                joined[-1] = last.united(box)
+                continue
+        joined.append(QRectF(box))
+    return joined
 
 
 def _line_spans(raw: str) -> list[tuple[int, int]]:
@@ -431,7 +483,7 @@ class PdfTextMap:
         return start + self._normalized_index(page, raw_index)
 
     def is_over_text(self, page: int, point: QPointF) -> bool:
-        """Whether `point` lands on a character of `page`.
+        """Whether `point` lands on the text of `page`, gaps between lines included.
 
         What decides between starting a text selection and drawing a region.
         """

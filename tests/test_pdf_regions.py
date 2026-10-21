@@ -277,6 +277,28 @@ def test_a_freehand_drag_across_text_also_selects_rather_than_drawing(
     assert viewer.textCursor().hasSelection()
 
 
+def test_dragging_from_between_two_lines_selects_rather_than_drawing(
+    qtbot, tmp_path, write_pdf
+):
+    """The gap between lines of a paragraph is inside the text, not off it."""
+    window = _pdf_window(qtbot, tmp_path, write_pdf, pages=[["First line.", "Second line."]])
+    viewer = window.pdf_viewer
+    first, second = viewer._source.page_lines(0)[:2]
+    upper, lower = first.boxes[0], second.boxes[0]
+    assert upper.bottom() < lower.top()  # the fixture really leaves a gap
+    between = (upper.left() + 5, (upper.bottom() + lower.top()) / 2)
+    assert not any(run.contains(QPointF(*between)) for run in (upper, lower))
+    start = viewport_point(viewer, 0, between)
+    end = viewport_point(viewer, 0, text_point(viewer, index=12))
+
+    QTest.mousePress(viewer.viewport(), Qt.LeftButton, Qt.NoModifier, start)
+    QTest.mouseMove(viewer.viewport(), end)
+    QTest.mouseRelease(viewer.viewport(), Qt.LeftButton, Qt.NoModifier, end)
+
+    assert _regions(window) == []
+    assert viewer.textCursor().hasSelection()
+
+
 def test_a_speck_of_a_drag_leaves_no_region(qtbot, tmp_path, write_pdf):
     window = _pdf_window(qtbot, tmp_path, write_pdf)
     viewer = window.pdf_viewer
