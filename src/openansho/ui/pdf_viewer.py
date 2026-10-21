@@ -477,16 +477,15 @@ class PdfViewer(VimTextNavigation, QAbstractScrollArea):
 
     def _visible_line_starts(self) -> list[int]:
         """Offsets of the first character of each line currently on screen."""
+        if self._text_map is None:
+            return []
         starts = []
         height = self.viewport().height()
         for page in self._visible_pages():
-            start, end = self._text_map.page_range(page) if self._text_map else (0, 0)
-            block = self._document.findBlock(start)
-            while block.isValid() and block.position() < end:
-                rect = self._cursor_rect(block.position())
+            for start, _end in self._text_map.display_lines(page):
+                rect = self._cursor_rect(start)
                 if not rect.isEmpty() and 0 <= rect.top() <= height:
-                    starts.append(block.position())
-                block = block.next()
+                    starts.append(start)
         return starts
 
     def _line_height(self) -> int:
@@ -510,6 +509,36 @@ class PdfViewer(VimTextNavigation, QAbstractScrollArea):
     def _scroll_viewport_lines(self, delta: int) -> None:
         bar = self.verticalScrollBar()
         bar.setValue(bar.value() + delta * self._line_height())
+
+    # j/k and gg/G walk the lines in the order the pages read in, which a
+    # PDF's text need not come out in — see PdfTextMap.display_lines.
+
+    def _move_down_line(self) -> None:
+        self._move_display_line(1)
+
+    def _move_up_line(self) -> None:
+        self._move_display_line(-1)
+
+    def _move_display_line(self, step: int) -> None:
+        if self._text_map is None:
+            return
+        position = self._cursor.position()
+        target = self._text_map.adjacent_line(position, step)
+        if target is None:
+            return
+        column = position - self._document.findBlock(position).position()
+        start, end = target
+        self._set_position(start + min(column, end - start))
+
+    def _move_to_document_start(self) -> None:
+        line = self._text_map.first_display_line() if self._text_map else None
+        if line is not None:
+            self._set_position(line[0])
+
+    def _move_to_document_end(self) -> None:
+        line = self._text_map.last_display_line() if self._text_map else None
+        if line is not None:
+            self._set_position(line[1])
 
     # -- mouse ---------------------------------------------------------------
 
@@ -729,7 +758,7 @@ class PdfViewer(VimTextNavigation, QAbstractScrollArea):
         if self._text_map is None or not self._cursor.hasSelection():
             return
         start, end = self._cursor.selectionStart(), self._cursor.selectionEnd()
-        for page, rect in self._text_map.rects_for_range(start, end):
+        for page, rect in self._text_map.selection_rects(start, end):
             painter.fillRect(self.from_page_rect(page, rect), TEXT_SELECTION_COLOR)
 
     def _paint_cursor(self, painter: QPainter) -> None:

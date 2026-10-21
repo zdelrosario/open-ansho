@@ -28,6 +28,7 @@ the no-Qt rule in the other non-UI modules is really protecting.
 
 from __future__ import annotations
 
+import heapq
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -47,6 +48,16 @@ PAGE_SEPARATOR = "\f\n"
 # represents.
 REGION_MARKER = "▭"
 REGION_MARKER_LINE = REGION_MARKER + "\n"
+
+# How far around its glyphs a line of text reaches for a press, in multiples
+# of the height of its runs (see `PdfPageSource.text_zones`): runs of one
+# line closer than JOIN are one stretch of text, and each stretch is padded
+# by the two PADDINGs. A run's box hugs the glyphs — about three quarters of
+# the font size — so a full height above and below is what it takes to
+# close the leading of double-spaced text.
+TEXT_ZONE_JOIN = 2.0
+TEXT_ZONE_PADDING_X = 0.5
+TEXT_ZONE_PADDING_Y = 1.0
 
 
 def read_pdf_text(path: Path) -> str:
@@ -124,6 +135,7 @@ class PdfPageSource:
             raise DocumentReadError(f"Could not read {name} as a PDF.")
         self._normalized: dict[int, tuple[str, list[int]]] = {}
         self._page_lines: dict[int, list[TextLine]] = {}
+        self._text_zones: dict[int, list[QRectF]] = {}
         self._char_rects: dict[tuple[int, int], QRectF | None] = {}
 
     @property
@@ -235,8 +247,35 @@ class PdfPageSource:
         return min(line.start + low, line.end - 1)
 
     def is_over_text(self, page: int, point: QPointF) -> bool:
-        """Whether `point` lands on a line of text on `page`."""
-        return self._run_at(page, point) is not None
+        """Whether `point` lands within the text of `page`.
+
+        Measured against `text_zones` rather than the bare runs, so a press
+        in the gap between two lines or two words still counts as on the
+        text — only a press clear of it starts a region.
+        """
+        return any(zone.contains(point) for zone in self.text_zones(page))
+
+    def text_zones(self, page: int) -> list[QRectF]:
+        """The areas of `page` a press counts as being on the text.
+
+        A run's rectangle hugs its glyphs, leaving thin gaps between lines
+        and between the runs of one line that read as text to the eye. Each
+        line's runs are joined across gaps narrower than `TEXT_ZONE_JOIN`
+        line heights, then padded by `TEXT_ZONE_PADDING_X`/`_Y` — enough to
+        close the leading of single- and double-spaced text without
+        reaching across a column gutter.
+        """
+        if page in self._text_zones:
+            return self._text_zones[page]
+
+        zones = []
+        for line in self.page_lines(page):
+            for zone in _join_runs(line.boxes):
+                pad_x = zone.height() * TEXT_ZONE_PADDING_X
+                pad_y = zone.height() * TEXT_ZONE_PADDING_Y
+                zones.append(zone.adjusted(-pad_x, -pad_y, pad_x, pad_y))
+        self._text_zones[page] = zones
+        return zones
 
     def _run_at(self, page: int, point: QPointF) -> tuple[TextLine, QRectF] | None:
         for line in self.page_lines(page):
@@ -284,6 +323,98 @@ class TextLine:
             if overlap > best_overlap:
                 best, best_overlap = box, overlap
         return best
+
+
+def _join_runs(boxes: tuple[QRectF, ...]) -> list[QRectF]:
+    """A line's runs, with neighbors closer than `TEXT_ZONE_JOIN` united."""
+    joined: list[QRectF] = []
+    for box in sorted(boxes, key=QRectF.left):
+        if joined:
+            last = joined[-1]
+            reach = max(last.height(), box.height()) * TEXT_ZONE_JOIN
+            if box.left() - last.right() < reach:
+                joined[-1] = last.united(box)
+                continue
+        joined.append(QRectF(box))
+    return joined
+
+
+def _reading_order(boxes: list[QRectF]) -> list[int]:
+    """The order to read lines placed at `boxes` in, as indices into it.
+
+    The content's own order, except where it contradicts the page: a line
+    is never read before a line above it that it shares any width with,
+    nor before a line to its left on the same row. Of the lines that are
+    free to come next, the earliest in the content goes first — so the two
+    columns of an article, which the content gives one after the other,
+    stay that way instead of being interleaved row by row, while a title
+    the file happened to write last moves back to the top.
+    """
+    count = len(boxes)
+    following: list[list[int]] = [[] for _ in range(count)]
+    waiting_on = [0] * count
+    for earlier in range(count):
+        for later in range(count):
+            if earlier != later and _reads_before(boxes[earlier], boxes[later]):
+                following[earlier].append(later)
+                waiting_on[later] += 1
+
+    ready = [index for index in range(count) if waiting_on[index] == 0]
+    heapq.heapify(ready)
+    order: list[int] = []
+    done = [False] * count
+    while len(order) < count:
+        if ready:
+            index = heapq.heappop(ready)
+        else:
+            # Skewed boxes can in principle constrain each other in a
+            # circle; fall back to the content's order to break it.
+            index = next(i for i in range(count) if not done[i])
+        if done[index]:
+            continue
+        done[index] = True
+        order.append(index)
+        for later in following[index]:
+            waiting_on[later] -= 1
+            if waiting_on[later] == 0 and not done[later]:
+                heapq.heappush(ready, later)
+    return order
+
+
+def _reads_before(earlier: QRectF, later: QRectF) -> bool:
+    """Whether the line at `earlier` has to be read before the one at `later`."""
+    slack = min(earlier.height(), later.height()) * 0.25
+    share_width = earlier.left() < later.right() and later.left() < earlier.right()
+    if share_width and earlier.bottom() <= later.top() + slack:
+        return True  # above it
+    same_row = (
+        earlier.top() < later.bottom() - slack and later.top() < earlier.bottom() - slack
+    )
+    return same_row and earlier.right() <= later.left()
+
+
+def _united(rects) -> QRectF:
+    united = QRectF(rects[0])
+    for rect in rects[1:]:
+        united = united.united(rect)
+    return united
+
+
+def _close_line_gaps(bands: list[QRectF]) -> None:
+    """Stretch consecutive lines' bands, in place, to meet halfway across the gap.
+
+    Only a gap narrow enough to be the leading within a paragraph — the
+    same reach `PdfPageSource.text_zones` gives a line — so the space
+    between paragraphs, or between a page's lines and a stray caption,
+    stays unselected-looking.
+    """
+    for upper, lower in zip(bands, bands[1:]):
+        gap = lower.top() - upper.bottom()
+        reach = min(upper.height(), lower.height()) * TEXT_ZONE_PADDING_Y * 2
+        if 0 < gap <= reach:
+            middle = upper.bottom() + gap / 2
+            upper.setBottom(middle)
+            lower.setTop(middle)
 
 
 def _line_spans(raw: str) -> list[tuple[int, int]]:
@@ -367,6 +498,8 @@ class PdfTextMap:
         # hold good across scrolling and zooming. A new map is built whenever
         # the content changes, which is what empties this.
         self._range_cache: dict[tuple[int, int], list[tuple[int, QRectF]]] = {}
+        self._selection_cache: dict[tuple[int, int], list[tuple[int, QRectF]]] = {}
+        self._display_lines: dict[int, list[tuple[int, int]]] = {}
 
     @property
     def page_count(self) -> int:
@@ -413,6 +546,150 @@ class PdfTextMap:
         self._range_cache[(start, end)] = rects
         return rects
 
+    def selection_rects(self, start: int, end: int) -> list[tuple[int, QRectF]]:
+        """One solid rectangle per line of text in [start, end).
+
+        How a selection is drawn, to look the way it does in the text pane:
+        a band the height of the line, spanning from the first selected
+        character on it to the last, with consecutive lines of a paragraph
+        meeting rather than leaving a stripe of page between them. The runs
+        `rects_for_range` returns can't be painted as they are — a PDF that
+        places its words, or its letters, one at a time comes back as a box
+        per word or letter, each hugging its own glyphs.
+        """
+        cached = self._selection_cache.get((start, end))
+        if cached is not None:
+            return cached
+        by_page: dict[int, list[QRectF]] = {}
+        for page, rect in self.rects_for_range(start, end):
+            by_page.setdefault(page, []).append(rect)
+
+        rects: list[tuple[int, QRectF]] = []
+        for page, runs in by_page.items():
+            bands = []
+            for line in self._source.page_lines(page):
+                extent = _united(line.boxes)
+                on_line = [
+                    run
+                    for run in runs
+                    if extent.top() <= run.center().y() <= extent.bottom()
+                    and run.right() >= extent.left()
+                    and run.left() <= extent.right()
+                ]
+                if not on_line:
+                    continue
+                runs = [run for run in runs if run not in on_line]
+                covered = _united(on_line)
+                bands.append(
+                    QRectF(covered.left(), extent.top(), covered.width(), extent.height())
+                )
+            bands.extend(runs)  # anything no line claimed, drawn as it came
+            _close_line_gaps(bands)
+            rects.extend((page, band) for band in bands)
+        self._selection_cache[(start, end)] = rects
+        return rects
+
+    def display_lines(self, page: int) -> list[tuple[int, int]]:
+        """The [start, end) of each content line of `page`, in reading order.
+
+        A PDF's text comes out in whatever order the file wrote it, which
+        need not be the order it reads in — the tutorial's title is written
+        last, so walking the content line by line visits it after the body.
+        The line motions walk this instead (see `_reading_order`). A line
+        with no glyphs on the page — a region marker, a blank line — keeps
+        its place after the line it follows in the content, or the end of
+        the page for the run of markers that ends it. Built a page at a
+        time, when first asked, since placing a page's lines means asking
+        the PDF about each of them.
+        """
+        if page in self._display_lines:
+            return self._display_lines[page]
+
+        start, end = self._ranges[page]
+        lines = []
+        position = start
+        for text in self._content[start:end].split("\n"):
+            lines.append((position, position + len(text)))
+            position += len(text) + 1
+        if len(lines) > 1 and lines[-1][0] == end:
+            lines.pop()  # what follows the page's final newline is not a line
+
+        placed: list[tuple[QRectF, list[tuple[int, int]]]] = []
+        leading: list[tuple[int, int]] = []
+        for line in lines:
+            box = self._line_box(page, line[0]) if line[1] > line[0] else None
+            if box is not None:
+                placed.append((box, [line]))
+            elif placed:
+                placed[-1][1].append(line)
+            else:
+                leading.append(line)
+        trailing = []
+        if placed:
+            # The lines after the last placed one end the page wherever that
+            # line is read, rather than following it to the top of the page.
+            last_box, last_lines = placed[-1]
+            placed[-1] = (last_box, last_lines[:1])
+            trailing = last_lines[1:]
+
+        ordered = list(leading)
+        for index in _reading_order([box for box, _lines in placed]):
+            ordered.extend(placed[index][1])
+        ordered.extend(trailing)
+        self._display_lines[page] = ordered
+        return ordered
+
+    def adjacent_line(self, offset: int, step: int) -> tuple[int, int] | None:
+        """The line read `step` (1 or -1) lines on from the one holding `offset`.
+
+        Crosses onto the next or previous page past the end of this one, and
+        is None past the end of the document.
+        """
+        page = self.page_for_offset(offset)
+        lines = self.display_lines(page)
+        index = next(
+            (i for i, (start, end) in enumerate(lines) if start <= offset <= end), None
+        )
+        if index is not None and 0 <= index + step < len(lines):
+            return lines[index + step]
+        if index is None and lines:
+            # On a page separator: before the first line of the page that
+            # starts there, or past the end of the one before it.
+            if offset < lines[0][0]:
+                if step > 0:
+                    return lines[0]
+            elif step < 0:
+                return lines[-1]
+        page += step
+        while 0 <= page < len(self._ranges):
+            lines = self.display_lines(page)
+            if lines:
+                return lines[0] if step > 0 else lines[-1]
+            page += step
+        return None
+
+    def first_display_line(self) -> tuple[int, int] | None:
+        for page in range(len(self._ranges)):
+            lines = self.display_lines(page)
+            if lines:
+                return lines[0]
+        return None
+
+    def last_display_line(self) -> tuple[int, int] | None:
+        for page in reversed(range(len(self._ranges))):
+            lines = self.display_lines(page)
+            if lines:
+                return lines[-1]
+        return None
+
+    def _line_box(self, page: int, offset: int) -> QRectF | None:
+        """Where the line of text starting at content `offset` sits on `page`."""
+        raw_index = self._raw_index(page, offset)
+        if raw_index is None:
+            return None
+        line = self._source.line_at(page, raw_index)
+        return _united(line.boxes) if line is not None else None
+
     def offset_at(self, page: int, point: QPointF) -> int:
         """The content offset of the character at `point` on `page`.
 
@@ -431,7 +708,7 @@ class PdfTextMap:
         return start + self._normalized_index(page, raw_index)
 
     def is_over_text(self, page: int, point: QPointF) -> bool:
-        """Whether `point` lands on a character of `page`.
+        """Whether `point` lands on the text of `page`, gaps between lines included.
 
         What decides between starting a text selection and drawing a region.
         """

@@ -230,7 +230,52 @@ def test_vim_motions_move_the_cursor_through_the_pdfs_text(qtbot, tmp_path, writ
     assert viewer.textCursor().blockNumber() == 1
 
     QTest.keyClick(viewer, Qt.Key_G, Qt.ShiftModifier)
-    assert viewer.textCursor().position() == len(viewer.toPlainText())
+    assert viewer.textCursor().position() == viewer.toPlainText().rindex(".") + 1
+
+
+def test_line_motions_follow_the_page_rather_than_the_files_text_order(
+    qtbot, tmp_path, write_pdf
+):
+    """The tutorial's regression: a title the file writes after the body.
+
+    Walking the content line by line visited the body and then jumped back
+    up to the title; j/k and gg/G walk the page top to bottom instead.
+    """
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    window.create_project(tmp_path / "project.sqlite")
+    write_pdf(
+        tmp_path / "titled.pdf",
+        [["Body line one.", "Body line two."]],
+        strays=[[(50, 770, "The Title")]],
+    )
+    window.import_document(tmp_path / "titled.pdf")
+    window.document_list.setCurrentRow(0)
+    viewer = window.pdf_viewer
+    viewer.setFocus()
+    qtbot.waitUntil(lambda: viewer.hasFocus())
+    text = viewer.toPlainText()
+    assert text.index("The Title") > text.index("Body line two.")  # as the file wrote it
+
+    def line():
+        position = viewer.textCursor().position()
+        return text[text.rfind("\n", 0, position) + 1 :].split("\n", 1)[0]
+
+    QTest.keyClick(viewer, Qt.Key_G)
+    QTest.keyClick(viewer, Qt.Key_G)
+    assert line() == "The Title"
+    QTest.keyClick(viewer, Qt.Key_J)
+    assert line() == "Body line one."
+    QTest.keyClick(viewer, Qt.Key_J)
+    assert line() == "Body line two."
+    QTest.keyClick(viewer, Qt.Key_J)
+    assert line() == "Body line two."  # the last line read, so j stays put
+    QTest.keyClick(viewer, Qt.Key_K)
+    QTest.keyClick(viewer, Qt.Key_K)
+    assert line() == "The Title"
+    QTest.keyClick(viewer, Qt.Key_G, Qt.ShiftModifier)
+    assert line() == "Body line two."
 
 
 def test_visual_mode_selects_text_on_the_page(qtbot, tmp_path, write_pdf):
