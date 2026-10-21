@@ -28,6 +28,7 @@ the no-Qt rule in the other non-UI modules is really protecting.
 
 from __future__ import annotations
 
+import heapq
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -338,6 +339,60 @@ def _join_runs(boxes: tuple[QRectF, ...]) -> list[QRectF]:
     return joined
 
 
+def _reading_order(boxes: list[QRectF]) -> list[int]:
+    """The order to read lines placed at `boxes` in, as indices into it.
+
+    The content's own order, except where it contradicts the page: a line
+    is never read before a line above it that it shares any width with,
+    nor before a line to its left on the same row. Of the lines that are
+    free to come next, the earliest in the content goes first — so the two
+    columns of an article, which the content gives one after the other,
+    stay that way instead of being interleaved row by row, while a title
+    the file happened to write last moves back to the top.
+    """
+    count = len(boxes)
+    following: list[list[int]] = [[] for _ in range(count)]
+    waiting_on = [0] * count
+    for earlier in range(count):
+        for later in range(count):
+            if earlier != later and _reads_before(boxes[earlier], boxes[later]):
+                following[earlier].append(later)
+                waiting_on[later] += 1
+
+    ready = [index for index in range(count) if waiting_on[index] == 0]
+    heapq.heapify(ready)
+    order: list[int] = []
+    done = [False] * count
+    while len(order) < count:
+        if ready:
+            index = heapq.heappop(ready)
+        else:
+            # Skewed boxes can in principle constrain each other in a
+            # circle; fall back to the content's order to break it.
+            index = next(i for i in range(count) if not done[i])
+        if done[index]:
+            continue
+        done[index] = True
+        order.append(index)
+        for later in following[index]:
+            waiting_on[later] -= 1
+            if waiting_on[later] == 0 and not done[later]:
+                heapq.heappush(ready, later)
+    return order
+
+
+def _reads_before(earlier: QRectF, later: QRectF) -> bool:
+    """Whether the line at `earlier` has to be read before the one at `later`."""
+    slack = min(earlier.height(), later.height()) * 0.25
+    share_width = earlier.left() < later.right() and later.left() < earlier.right()
+    if share_width and earlier.bottom() <= later.top() + slack:
+        return True  # above it
+    same_row = (
+        earlier.top() < later.bottom() - slack and later.top() < earlier.bottom() - slack
+    )
+    return same_row and earlier.right() <= later.left()
+
+
 def _united(rects) -> QRectF:
     united = QRectF(rects[0])
     for rect in rects[1:]:
@@ -444,6 +499,7 @@ class PdfTextMap:
         # the content changes, which is what empties this.
         self._range_cache: dict[tuple[int, int], list[tuple[int, QRectF]]] = {}
         self._selection_cache: dict[tuple[int, int], list[tuple[int, QRectF]]] = {}
+        self._display_lines: dict[int, list[tuple[int, int]]] = {}
 
     @property
     def page_count(self) -> int:
@@ -532,6 +588,107 @@ class PdfTextMap:
             rects.extend((page, band) for band in bands)
         self._selection_cache[(start, end)] = rects
         return rects
+
+    def display_lines(self, page: int) -> list[tuple[int, int]]:
+        """The [start, end) of each content line of `page`, in reading order.
+
+        A PDF's text comes out in whatever order the file wrote it, which
+        need not be the order it reads in — the tutorial's title is written
+        last, so walking the content line by line visits it after the body.
+        The line motions walk this instead (see `_reading_order`). A line
+        with no glyphs on the page — a region marker, a blank line — keeps
+        its place after the line it follows in the content, or the end of
+        the page for the run of markers that ends it. Built a page at a
+        time, when first asked, since placing a page's lines means asking
+        the PDF about each of them.
+        """
+        if page in self._display_lines:
+            return self._display_lines[page]
+
+        start, end = self._ranges[page]
+        lines = []
+        position = start
+        for text in self._content[start:end].split("\n"):
+            lines.append((position, position + len(text)))
+            position += len(text) + 1
+        if len(lines) > 1 and lines[-1][0] == end:
+            lines.pop()  # what follows the page's final newline is not a line
+
+        placed: list[tuple[QRectF, list[tuple[int, int]]]] = []
+        leading: list[tuple[int, int]] = []
+        for line in lines:
+            box = self._line_box(page, line[0]) if line[1] > line[0] else None
+            if box is not None:
+                placed.append((box, [line]))
+            elif placed:
+                placed[-1][1].append(line)
+            else:
+                leading.append(line)
+        trailing = []
+        if placed:
+            # The lines after the last placed one end the page wherever that
+            # line is read, rather than following it to the top of the page.
+            last_box, last_lines = placed[-1]
+            placed[-1] = (last_box, last_lines[:1])
+            trailing = last_lines[1:]
+
+        ordered = list(leading)
+        for index in _reading_order([box for box, _lines in placed]):
+            ordered.extend(placed[index][1])
+        ordered.extend(trailing)
+        self._display_lines[page] = ordered
+        return ordered
+
+    def adjacent_line(self, offset: int, step: int) -> tuple[int, int] | None:
+        """The line read `step` (1 or -1) lines on from the one holding `offset`.
+
+        Crosses onto the next or previous page past the end of this one, and
+        is None past the end of the document.
+        """
+        page = self.page_for_offset(offset)
+        lines = self.display_lines(page)
+        index = next(
+            (i for i, (start, end) in enumerate(lines) if start <= offset <= end), None
+        )
+        if index is not None and 0 <= index + step < len(lines):
+            return lines[index + step]
+        if index is None and lines:
+            # On a page separator: before the first line of the page that
+            # starts there, or past the end of the one before it.
+            if offset < lines[0][0]:
+                if step > 0:
+                    return lines[0]
+            elif step < 0:
+                return lines[-1]
+        page += step
+        while 0 <= page < len(self._ranges):
+            lines = self.display_lines(page)
+            if lines:
+                return lines[0] if step > 0 else lines[-1]
+            page += step
+        return None
+
+    def first_display_line(self) -> tuple[int, int] | None:
+        for page in range(len(self._ranges)):
+            lines = self.display_lines(page)
+            if lines:
+                return lines[0]
+        return None
+
+    def last_display_line(self) -> tuple[int, int] | None:
+        for page in reversed(range(len(self._ranges))):
+            lines = self.display_lines(page)
+            if lines:
+                return lines[-1]
+        return None
+
+    def _line_box(self, page: int, offset: int) -> QRectF | None:
+        """Where the line of text starting at content `offset` sits on `page`."""
+        raw_index = self._raw_index(page, offset)
+        if raw_index is None:
+            return None
+        line = self._source.line_at(page, raw_index)
+        return _united(line.boxes) if line is not None else None
 
     def offset_at(self, page: int, point: QPointF) -> int:
         """The content offset of the character at `point` on `page`.

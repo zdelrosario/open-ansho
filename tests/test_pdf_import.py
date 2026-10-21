@@ -133,6 +133,19 @@ def test_a_selection_is_one_solid_band_per_line(tmp_path, write_pdf):
     assert first.bottom() == second.top()  # the lines meet, no stripe between
 
 
+
+def test_two_columns_read_one_after_the_other_not_row_by_row(tmp_path, write_pdf):
+    left = [(50, 700 - 14 * row, f"left {row}") for row in range(3)]
+    right = [(320, 700 - 14 * row, f"right {row}") for row in range(3)]
+    path = write_pdf(tmp_path / "columns.pdf", [[]], strays=[left + right])
+    content = pdf_extract.read_pdf_text(path)
+    text_map = pdf_extract.PdfTextMap(content, pdf_extract.PdfPageSource(path.read_bytes()))
+
+    lines = [content[start:end] for start, end in text_map.display_lines(0)]
+
+    assert lines == ["left 0", "left 1", "left 2", "right 0", "right 1", "right 2"]
+
+
 # -- import -------------------------------------------------------------------
 
 

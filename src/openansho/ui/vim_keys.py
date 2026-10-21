@@ -177,10 +177,10 @@ class VimTextNavigation:
             self._pending_z = False
             if shift:
                 self._pending_g = False
-                self._move(QTextCursor.End)
+                self._move_to_document_end()
             elif self._pending_g:
                 self._pending_g = False
-                self._move(QTextCursor.Start)
+                self._move_to_document_start()
             else:
                 self._pending_g = True
             event.accept()
@@ -471,6 +471,16 @@ class VimTextNavigation:
         move_mode = QTextCursor.KeepAnchor if self.mode == self.VISUAL else QTextCursor.MoveAnchor
         cursor.movePosition(operation, move_mode)
         self.setTextCursor(cursor)
+
+    # The line motions below read the content's lines in order, which is
+    # also the order they are shown in the text pane. `PdfViewer` overrides
+    # them: a PDF's text can come out in an order other than the page's.
+
+    def _move_to_document_start(self) -> None:
+        self._move(QTextCursor.Start)
+
+    def _move_to_document_end(self) -> None:
+        self._move(QTextCursor.End)
 
     def _move_to_line_start(self) -> None:
         self._set_position(self.textCursor().block().position())
