@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
 from openansho import __version__, db, pdf_extract, reporting, text_extract, tutorial, user
 from openansho.db import Code
 from openansho.ui.checkable_combo_box import CheckableComboBox
+from openansho.ui.code_description_dialog import CodeDescriptionDialog
 from openansho.ui.code_filter_input import CodeFilterLineEdit
 from openansho.ui.code_tree import CodeTreeWidget
 from openansho.ui.font_scale import (
@@ -501,7 +502,7 @@ class MainWindow(QMainWindow):
             # These pane shortcuts (Space, Escape, x, c, ?, ...) are only meant to
             # apply while focus is somewhere inside this window's own panes. When a
             # separate top-level widget has focus instead — most commonly a modal
-            # dialog like the code description editor's QInputDialog — this filter
+            # dialog like the code description editor — this filter
             # must stand down entirely, or it'll steal keys (e.g. swallowing Space
             # meant to be typed into the dialog's text box) that were never meant
             # for these shortcuts at all.
@@ -1017,12 +1018,10 @@ class MainWindow(QMainWindow):
         self.rename_code(code_id, name.strip())
 
     def _on_edit_code_description(self, code_id: int, current_description: str | None) -> None:
-        description, ok = QInputDialog.getMultiLineText(
-            self, "Edit Description", "Code description:", current_description or ""
-        )
-        if not ok:
+        dialog = CodeDescriptionDialog(current_description or "", self)
+        if dialog.exec() != QDialog.Accepted:
             return
-        self.edit_code_description(code_id, description.strip())
+        self.edit_code_description(code_id, dialog.description().strip())
 
     def _on_delete_code(self, code_id: int, name: str) -> None:
         reply = QMessageBox.question(
