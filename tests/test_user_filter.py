@@ -141,6 +141,34 @@ def test_multi_user_segment_list_only_shows_segments_overlapping_the_cursor(qtbo
     assert window.segment_list.count() == 0
 
 
+def test_multi_user_selecting_a_code_lists_its_segments_from_every_selected_user(
+    qtbot, tmp_path
+):
+    window = _setup_project_with_document(qtbot, tmp_path)
+    frustration = window.add_code("Frustration")
+    window.add_code("Greeting")
+
+    window.username = "alice"
+    window.apply_segment(frustration.id, 6, 17)  # "frustrating"
+    _add_existing_segment(window, frustration, 0, 5, "bob")  # "Hello"
+
+    _check(window.user_filter_combo, "bob")
+    _place_cursor(window, 22)  # inside "world.", coded by no one
+    assert window.segment_list.count() == 0
+
+    window.code_tree.setCurrentItem(window.code_tree.topLevelItem(0))
+    assert window.segment_code_label.text() == "Frustration"
+    texts = [window.segment_list.item(i).text() for i in range(window.segment_list.count())]
+    assert len(texts) == 2
+    assert any("alice" in text for text in texts)
+    assert any("bob" in text for text in texts)
+
+    # Moving the cursor goes back to comparing codes at the cursor.
+    _place_cursor(window, 2)  # inside bob's "Hello"
+    assert window.segment_list.item(0).text() == "Frustration"
+    assert window.segment_list.count() == 2
+
+
 def test_multi_user_segment_list_groups_overlapping_segments_by_code(qtbot, tmp_path):
     window = _setup_project_with_document(qtbot, tmp_path)
     frustration = window.add_code("Frustration")

@@ -2237,12 +2237,14 @@ class MainWindow(QMainWindow):
             for doc_id in documents_by_id
         }
 
-        # Multiple selected users always show the cursor/selection-driven
-        # grouped view (comparing everyone's codes at that span); a single
-        # user only does when the last panel-affecting action was a viewer
-        # cursor/selection move that landed on a coded span (see
-        # _on_viewer_cursor_moved) rather than a codebook click.
-        if len(selected_usernames) > 1 or self._segments_panel_mode == "cursor":
+        # The cursor/selection-driven grouped view (comparing everyone's codes
+        # at that span) shows when the last panel-affecting action was a
+        # viewer cursor/selection move (see _on_viewer_cursor_moved) rather
+        # than a codebook click. With multiple selected users every cursor
+        # move switches to it; with a single user only one that lands on a
+        # coded span does. A codebook click lists that code's segments from
+        # every selected user either way.
+        if self._segments_panel_mode == "cursor":
             self.segment_code_label.clear()
             self.segment_code_label.setStyleSheet("")
             segments = [
