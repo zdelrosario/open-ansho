@@ -13,6 +13,7 @@ def test_export_actions_disabled_without_project(qtbot):
 
     assert not window.export_csv_action.isEnabled()
     assert not window.export_json_action.isEnabled()
+    assert not window.export_codebook_action.isEnabled()
     assert not window.code_frequency_action.isEnabled()
     assert not window.export_code_frequency_menu.isEnabled()
 
@@ -37,6 +38,7 @@ def test_export_actions_enabled_with_project(qtbot, tmp_path):
 
     assert window.export_csv_action.isEnabled()
     assert window.export_json_action.isEnabled()
+    assert window.export_codebook_action.isEnabled()
     assert window.code_frequency_action.isEnabled()
     assert window.export_code_frequency_menu.isEnabled()
 
@@ -149,3 +151,35 @@ def test_on_code_frequency_report_builds_dialog_with_rows(qtbot, tmp_path, monke
     assert captured["executed"] is True
     assert captured["rows"][0]["path"] == "Frustration"
     assert captured["rows"][0]["count"] == 0
+
+
+def test_on_export_codebook_csv_writes_file(qtbot, tmp_path, monkeypatch):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.create_project(tmp_path / "project.sqlite")
+    doc_path = tmp_path / "doc.txt"
+    doc_path.write_text("Hello frustrating world.", encoding="utf-8")
+    window.import_document(doc_path)
+    window.document_list.setCurrentRow(0)
+    parent = window.add_code("Emotions")
+    code = window.add_code("Frustration", parent_id=parent.id)
+    window.apply_segment(code.id, 6, 17)
+
+    out_path = tmp_path / "codebook"
+    monkeypatch.setattr(
+        "openansho.ui.main_window.QFileDialog.getSaveFileName",
+        lambda *args, **kwargs: (str(out_path), ""),
+    )
+    monkeypatch.setattr(
+        "openansho.ui.main_window.QMessageBox.information",
+        lambda *args, **kwargs: None,
+    )
+
+    window._on_export_codebook_csv()
+
+    with open(tmp_path / "codebook.csv", newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    by_code = {row["code"]: row for row in rows}
+    assert by_code["Frustration"]["parent"] == "Emotions"
+    assert by_code["Frustration"]["count"] == "1"
+    assert by_code["Emotions"]["count"] == "0"

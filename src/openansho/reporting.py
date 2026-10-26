@@ -141,8 +141,30 @@ def code_user_frequency(conn: sqlite3.Connection) -> list[dict]:
     return rows
 
 
+def codebook(conn: sqlite3.Connection) -> list[dict]:
+    """One row per code: its name, its parent's name, how many segments are
+    coded with it, and its description. Rows follow the tree's breadcrumb
+    order, so a parent comes right before its children."""
+    codes_by_id = {code.id: code for code in db.list_codes(conn)}
+    rows = []
+    for code in codes_by_id.values():
+        parent = codes_by_id.get(code.parent_id) if code.parent_id else None
+        rows.append(
+            {
+                "path": code_path(codes_by_id, code.id),
+                "code": code.name,
+                "parent": parent.name if parent else "",
+                "count": len(db.list_segments_for_code(conn, code.id)),
+                "description": code.description or "",
+            }
+        )
+    rows.sort(key=lambda row: row["path"])
+    return [{key: value for key, value in row.items() if key != "path"} for row in rows]
+
+
 CODE_FREQUENCY_CSV_FIELDNAMES = ["code", "count"]
 CODE_USER_FREQUENCY_CSV_FIELDNAMES = ["code", "parent", "username", "count"]
+CODEBOOK_CSV_FIELDNAMES = ["code", "parent", "count", "description"]
 
 
 def export_code_frequency_csv(conn: sqlite3.Connection, path: str | Path) -> int:
@@ -176,4 +198,13 @@ def export_code_user_frequency_json(conn: sqlite3.Connection, path: str | Path) 
     rows = code_user_frequency(conn)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(rows, f, indent=2)
+    return len(rows)
+
+
+def export_codebook_csv(conn: sqlite3.Connection, path: str | Path) -> int:
+    rows = codebook(conn)
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=CODEBOOK_CSV_FIELDNAMES)
+        writer.writeheader()
+        writer.writerows(rows)
     return len(rows)
