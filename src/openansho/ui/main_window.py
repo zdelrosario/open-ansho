@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
     QWidgetAction,
 )
 
-from openansho import db, pdf_extract, reporting, text_extract, tutorial, user
+from openansho import __version__, db, pdf_extract, reporting, text_extract, tutorial, user
 from openansho.db import Code
 from openansho.ui.checkable_combo_box import CheckableComboBox
 from openansho.ui.code_filter_input import CodeFilterLineEdit
@@ -54,6 +54,7 @@ from openansho.ui.report_dialog import CodeFrequencyDialog, CodeUserFrequencyDia
 from openansho.ui.shortcuts_dialog import ShortcutsDialog
 from openansho.ui.vim_viewer import CodeHighlight, VimTextViewer
 
+APP_TITLE = f"OpenAnsho {__version__}"
 PROJECT_FILTER = "OpenAnsho Project (*.sqlite)"
 TEXT_FILTER = (
     "Documents (*.txt *.docx *.pdf);;Text Files (*.txt);;"
@@ -297,7 +298,7 @@ class MainWindow(QMainWindow):
         )
         apply_font_scale(self._font_scale_percent)
 
-        self.setWindowTitle("OpenAnsho")
+        self.setWindowTitle(APP_TITLE)
         self.resize(1150, 650)
 
         self.document_list = QListWidget()
@@ -1330,7 +1331,7 @@ class MainWindow(QMainWindow):
         self._refresh_documents()
         self._refresh_codes()
         self._update_actions_enabled()
-        self.setWindowTitle("OpenAnsho")
+        self.setWindowTitle(APP_TITLE)
         self.statusBar().showMessage("No project open")
 
     def import_document(self, path: Path, *, overwrite: bool = False) -> bool:
@@ -1924,7 +1925,7 @@ class MainWindow(QMainWindow):
         self._current_document_id = None
         self._user_filter_overrides = {}
         name = path.name if path is not None else TUTORIAL_PROJECT_NAME
-        self.setWindowTitle(f"OpenAnsho — {name}")
+        self.setWindowTitle(f"{APP_TITLE} — {name}")
         self.statusBar().showMessage(
             str(path) if path is not None else TUTORIAL_STATUS_MESSAGE
         )
