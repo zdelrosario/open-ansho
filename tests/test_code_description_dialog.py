@@ -24,3 +24,14 @@ def test_plain_enter_inserts_newline(qtbot):
 
     assert dialog.result() != QDialog.Accepted
     assert dialog.description() == "a\nb"
+
+
+def test_long_description_wraps(qtbot):
+    dialog = CodeDescriptionDialog("word " * 200)
+    qtbot.addWidget(dialog)
+    dialog.show()
+    qtbot.waitExposed(dialog)
+
+    layout = dialog.editor.document().firstBlock().layout()
+    assert layout.lineCount() > 1
+    assert dialog.editor.horizontalScrollBar().maximum() == 0

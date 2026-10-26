@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QEvent, Qt
+from PySide6.QtGui import QTextOption
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -19,6 +20,8 @@ class CodeDescriptionDialog(QDialog):
 
         self.editor = QPlainTextEdit()
         self.editor.setPlainText(current_description)
+        self.editor.setLineWrapMode(QPlainTextEdit.WidgetWidth)
+        self.editor.setWordWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
         self.editor.installEventFilter(self)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -34,6 +37,7 @@ class CodeDescriptionDialog(QDialog):
         layout.addWidget(buttons)
         layout.addWidget(hint)
 
+        self.resize(480, 300)
         self.editor.setFocus()
 
     def description(self) -> str:
