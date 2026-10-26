@@ -345,3 +345,25 @@ def test_code_context_menu_disables_move_to_top_level_for_a_root_code(qtbot, tmp
     window._on_code_context_menu(_item_center(window.code_tree, root_item))
 
     assert not captured["actions"]["Move to Top Level"].isEnabled()
+
+
+def test_opening_project_migrates_retired_color_class(qtbot, tmp_path):
+    path = tmp_path / "project.sqlite"
+    conn = db.connect(path)
+    parent = db.create_code(conn, "Emotions", color="#004D40", color_class="#004D40")
+    child = db.create_code(
+        conn, "Frustration", parent_id=parent.id, color="#4d8279", color_class="#004D40"
+    )
+    other = db.create_code(conn, "Places", color="#1E88E5", color_class="#1E88E5")
+    conn.close()
+
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.open_project(path)
+
+    updated_parent = db.get_code(window.conn, parent.id)
+    updated_child = db.get_code(window.conn, child.id)
+    assert updated_parent.color_class == updated_parent.color == "#00715E"
+    assert updated_child.color_class == "#00715E"
+    assert updated_child.color == "#59a296"  # #00715E lightened one step
+    assert db.get_code(window.conn, other.id).color == "#1E88E5"

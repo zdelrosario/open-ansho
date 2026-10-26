@@ -115,7 +115,7 @@ BASE_COLOR_CLASSES = [
     "#D81B60",
     "#1E88E5",
     "#FFC107",
-    "#004D40",
+    "#00715E",
     "#DE6E1C",
     "#A65BC0",
 ]
@@ -132,10 +132,17 @@ BASE_COLOR_CLASS_NAMES = {
     "#D81B60": "Red",
     "#1E88E5": "Blue",
     "#FFC107": "Yellow",
-    "#004D40": "Green",
+    "#00715E": "Green",
     "#DE6E1C": "Orange",
     "#A65BC0": "Purple",
     GREY_COLOR_CLASS: "Grey",
+}
+
+# Base color classes that have been replaced, mapped to their replacement.
+# Codes store their color in the project, so a project saved before a change
+# still carries the old class until `_migrate_retired_color_classes` moves it.
+RETIRED_COLOR_CLASSES = {
+    "#004D40": "#00715E",
 }
 
 # Fraction of the way to blend a child's color toward white, relative to its
@@ -1468,6 +1475,15 @@ class MainWindow(QMainWindow):
 
         recolor_children(code_id, color)
 
+    def _migrate_retired_color_classes(self) -> None:
+        """Move root codes off a retired base color class onto its replacement,
+        re-deriving their descendants' tints from the new base color."""
+        for code in db.list_codes(self.conn):
+            replacement = RETIRED_COLOR_CLASSES.get(code.color_class)
+            if code.parent_id is None and replacement is not None:
+                db.set_code_color(self.conn, code.id, replacement, replacement)
+                self._recolor_descendants(code.id, replacement, replacement)
+
     def delete_code(self, code_id: int) -> None:
         if self.conn is None:
             raise RuntimeError("No project open")
@@ -1934,6 +1950,7 @@ class MainWindow(QMainWindow):
             self.conn.close()
         self.conn = conn
         self.project_path = path
+        self._migrate_retired_color_classes()
         self.username = None
         self._update_username_label()
         self._current_document_id = None
