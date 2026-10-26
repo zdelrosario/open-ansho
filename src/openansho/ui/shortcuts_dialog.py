@@ -97,6 +97,12 @@ SHORTCUT_SECTIONS = [
             ),
         ],
     ),
+    (
+        "Edit Description dialog",
+        [
+            ("Ctrl+Enter", "Save the description (same as OK)"),
+        ],
+    ),
 ]
 
 
