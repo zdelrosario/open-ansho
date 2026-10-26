@@ -196,3 +196,40 @@ def test_export_code_user_frequency_json(conn, tmp_path):
         rows = json.load(f)
     by_code = {row["code"]: row for row in rows}
     assert by_code["Frustration"]["username"] == "alice"
+
+
+def test_codebook_lists_every_code_with_parent_count_and_description(conn):
+    doc, emotions, frustration, reward = _sample_project(conn)
+    db.set_code_description(conn, frustration.id, "Annoyance at obstacles")
+
+    assert reporting.codebook(conn) == [
+        {"code": "Emotions", "parent": "", "count": 0, "description": ""},
+        {
+            "code": "Frustration",
+            "parent": "Emotions",
+            "count": 1,
+            "description": "Annoyance at obstacles",
+        },
+        {"code": "Reward", "parent": "", "count": 1, "description": ""},
+    ]
+
+
+def test_export_codebook_csv(conn, tmp_path):
+    doc, emotions, frustration, reward = _sample_project(conn)
+    db.set_code_description(conn, reward.id, "Positive payoff")
+    out_path = tmp_path / "codebook.csv"
+
+    count = reporting.export_codebook_csv(conn, out_path)
+
+    assert count == 3
+    with open(out_path, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        rows = list(reader)
+    assert reader.fieldnames == ["code", "parent", "count", "description"]
+    assert rows[1] == {
+        "code": "Frustration",
+        "parent": "Emotions",
+        "count": "1",
+        "description": "",
+    }
+    assert rows[2]["description"] == "Positive payoff"

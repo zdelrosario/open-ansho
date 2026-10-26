@@ -615,6 +615,10 @@ class MainWindow(QMainWindow):
         self.export_json_action.triggered.connect(self._on_export_json)
         file_menu.addAction(self.export_json_action)
 
+        self.export_codebook_action = QAction("Export Codebook (CSV)…", self)
+        self.export_codebook_action.triggered.connect(self._on_export_codebook_csv)
+        file_menu.addAction(self.export_codebook_action)
+
         self.export_code_frequency_menu = QMenu("Export Code Frequency Report", self)
         file_menu.addMenu(self.export_code_frequency_menu)
 
@@ -1171,6 +1175,17 @@ class MainWindow(QMainWindow):
             path_str += ".json"
         count = reporting.export_segments_json(self.conn, path_str)
         QMessageBox.information(self, "Export Complete", f"Exported {count} segment(s).")
+
+    def _on_export_codebook_csv(self) -> None:
+        if self.conn is None:
+            return
+        path_str, _ = QFileDialog.getSaveFileName(self, "Export Codebook (CSV)", "", CSV_FILTER)
+        if not path_str:
+            return
+        if not path_str.endswith(".csv"):
+            path_str += ".csv"
+        count = reporting.export_codebook_csv(self.conn, path_str)
+        QMessageBox.information(self, "Export Complete", f"Exported {count} code(s).")
 
     def _on_export_code_frequency_csv(self) -> None:
         if self.conn is None:
@@ -2487,6 +2502,7 @@ class MainWindow(QMainWindow):
         self.import_action.setText(IMPORT_LABEL_TUTORIAL if in_tutorial else IMPORT_LABEL)
         self.export_csv_action.setEnabled(has_project)
         self.export_json_action.setEnabled(has_project)
+        self.export_codebook_action.setEnabled(has_project)
         self.export_code_frequency_menu.setEnabled(has_project)
         self.close_project_action.setEnabled(has_project)
         self.code_frequency_action.setEnabled(has_project)
