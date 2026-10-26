@@ -1,7 +1,7 @@
 from PySide6.QtCore import QSettings
 from PySide6.QtGui import QPalette
 
-from openansho import db
+from openansho import __version__, db
 from openansho.ui import main_window as main_window_module
 from openansho.ui.main_window import (
     DARK_MODE_KEY,
@@ -30,6 +30,17 @@ def test_create_project_enables_import_and_sets_title(qtbot, tmp_path):
     assert window.import_action.isEnabled()
     assert "my_study.sqlite" in window.windowTitle()
     assert project_path.exists()
+
+
+def test_window_title_shows_version(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    assert window.windowTitle() == f"OpenAnsho {__version__}"
+
+    window.create_project(tmp_path / "my_study.sqlite")
+
+    assert window.windowTitle().startswith(f"OpenAnsho {__version__} — ")
 
 
 def test_import_document_populates_list_and_viewer(qtbot, tmp_path):
