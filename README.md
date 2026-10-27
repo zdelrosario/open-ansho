@@ -1,5 +1,7 @@
 # Open Ansho (暗証) - Open-source qualitative data analysis
 
+[![PyPI](https://img.shields.io/pypi/v/openansho)](https://pypi.org/project/openansho/)
+
 Open Ansho is a free and open-source desktop app for qualitative data analysis of text documents. This was designed as a fast and focused tool with the following goals:
 
 - Fast coding: By using Vim-inspired keybindings, you can code a document without ever moving your hands off the keyboard.
