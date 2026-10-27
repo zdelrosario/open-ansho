@@ -155,6 +155,25 @@ def connect(path: str | Path) -> sqlite3.Connection:
     return conn
 
 
+def connect_copy(path: str | Path) -> sqlite3.Connection:
+    """Open an in-memory copy of the project at `path`.
+
+    `connect` migrates the file it opens, which is a write; reading another
+    project (to merge it, say) shouldn't change that project's file, so the
+    copy is migrated instead and the original is only ever opened read-only.
+    """
+    source = sqlite3.connect(f"{Path(path).resolve().as_uri()}?mode=ro", uri=True)
+    conn = sqlite3.connect(":memory:")
+    try:
+        source.backup(conn)
+    finally:
+        source.close()
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    init_db(conn)
+    return conn
+
+
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
     _migrate(conn)
@@ -358,7 +377,13 @@ def create_segment(
     end_offset: int,
     memo: str | None = None,
     created_by: str | None = None,
+    created_at: str | None = None,
 ) -> Segment:
+    """Insert a segment, or return the identical one that already exists.
+
+    `created_at` defaults to now; it's given when copying a segment from
+    another project, so the copy keeps the time it was really coded.
+    """
     if end_offset <= start_offset:
         raise ValueError("end_offset must be greater than start_offset")
     existing = conn.execute(
@@ -377,7 +402,15 @@ def create_segment(
             (document_id, code_id, start_offset, end_offset, memo, created_by, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
-        (document_id, code_id, start_offset, end_offset, memo, created_by, _now()),
+        (
+            document_id,
+            code_id,
+            start_offset,
+            end_offset,
+            memo,
+            created_by,
+            created_at or _now(),
+        ),
     )
     conn.commit()
     return get_segment(conn, cur.lastrowid)
@@ -496,6 +529,7 @@ def create_region(
     text_offset: int,
     points: list[tuple[float, float]],
     created_by: str | None = None,
+    created_at: str | None = None,
 ) -> Region:
     """Record a region outlined by `points`, in page fractions.
 
@@ -521,7 +555,7 @@ def create_region(
             max(ys) - min(ys),
             json.dumps([[float(x), float(y)] for x, y in points]),
             created_by,
-            _now(),
+            created_at or _now(),
         ),
     )
     conn.commit()

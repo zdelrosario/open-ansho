@@ -32,7 +32,16 @@ from PySide6.QtWidgets import (
     QWidgetAction,
 )
 
-from openansho import __version__, db, pdf_extract, reporting, text_extract, tutorial, user
+from openansho import (
+    __version__,
+    db,
+    pdf_extract,
+    project_merge,
+    reporting,
+    text_extract,
+    tutorial,
+    user,
+)
 from openansho.db import Code
 from openansho.ui.checkable_combo_box import CheckableComboBox
 from openansho.ui.code_description_dialog import CodeDescriptionDialog
@@ -48,6 +57,7 @@ from openansho.ui.font_scale import (
     font_scale_style,
 )
 from openansho.ui.merge_codes_dialog import MergeCodesDialog
+from openansho.ui.merge_project_dialog import MergeProjectDialog
 from openansho.ui.os_theme import detect_dark_mode
 from openansho.ui.pdf_viewer import PdfPane, RegionMark
 from openansho.ui.preferences_dialog import PreferencesDialog
@@ -616,6 +626,10 @@ class MainWindow(QMainWindow):
         self.import_action.triggered.connect(self._on_import_document)
         file_menu.addAction(self.import_action)
 
+        self.merge_project_action = QAction("Merge Project…", self)
+        self.merge_project_action.triggered.connect(self._on_merge_project)
+        file_menu.addAction(self.merge_project_action)
+
         self.export_csv_action = QAction("Export Segments (&CSV)…", self)
         self.export_csv_action.triggered.connect(self._on_export_csv)
         file_menu.addAction(self.export_csv_action)
@@ -799,6 +813,51 @@ class MainWindow(QMainWindow):
             self.import_document(path, overwrite=True)
             return
         self.import_document(path)
+
+    def _on_merge_project(self) -> None:
+        if self.conn is None:
+            return
+        path_str, _ = QFileDialog.getOpenFileName(
+            self, "Merge Project", "", PROJECT_FILTER
+        )
+        if not path_str:
+            return
+        path = Path(path_str)
+        if self.project_path is not None and path.resolve() == self.project_path.resolve():
+            QMessageBox.information(
+                self, "Merge Project", "That is the project already open."
+            )
+            return
+        try:
+            other = db.connect_copy(path)
+        except sqlite3.Error as exc:
+            QMessageBox.warning(
+                self, "Merge Project", f"Could not open {path.name}: {exc}"
+            )
+            return
+        try:
+            plan = project_merge.plan_merge(self.conn, other)
+            dialog = MergeProjectDialog(plan, path.name, parent=self)
+            if dialog.exec() != QDialog.Accepted:
+                return
+            result = self.merge_project(other, plan, dialog.use_other_ids(), path.stem)
+        finally:
+            other.close()
+        lines = [
+            f"Added {result.documents_added} document(s), {result.codes_added} "
+            f"code(s) and {result.segments_added} coded segment(s).",
+        ]
+        if result.codes_updated:
+            lines.append(
+                f"Took the other project's version of {result.codes_updated} code(s)."
+            )
+        if result.documents_renamed:
+            lines.append(
+                "\nThese documents have the same name but different text in the two "
+                "projects, so the other project's copy was added separately:"
+            )
+            lines.extend(f"  {old} → {new}" for old, new in result.documents_renamed)
+        QMessageBox.information(self, "Merge Project", "\n".join(lines))
 
     def _on_document_selected(
         self, current: QListWidgetItem | None, _previous: QListWidgetItem | None
@@ -1386,6 +1445,42 @@ class MainWindow(QMainWindow):
         self._refresh_documents()
         self._select_document(doc.id)
         return True
+
+    def merge_project(
+        self,
+        other: sqlite3.Connection,
+        plan: project_merge.MergePlan,
+        use_other: set[int],
+        other_label: str = "merged",
+    ) -> project_merge.MergeResult:
+        """Merge `other` into the open project (see `project_merge`).
+
+        `use_other` holds the other project's ids of the conflicting codes
+        whose version should win. Codes the merge adds or moves keep whatever
+        color they had, so every root's color is reapplied to its subtree
+        afterward to restore the parent-inherits-lighter invariant.
+        """
+        if self.conn is None:
+            raise RuntimeError("No project open")
+        result = project_merge.apply_merge(self.conn, other, plan, use_other, other_label)
+        self._migrate_retired_color_classes()
+        for code in db.list_codes(self.conn):
+            if code.parent_id is not None:
+                continue
+            color_class = code.color_class or self._next_color_class()
+            db.set_code_color(self.conn, code.id, color_class, color_class)
+            self._recolor_descendants(code.id, color_class, color_class)
+        # Repopulating the document list clears its selection, which forgets
+        # the open document; reselect it so the user stays where they were.
+        document_id = self._current_document_id
+        self._refresh_documents()
+        self._refresh_user_filter()
+        self._refresh_codes()
+        if document_id is not None:
+            self._select_document(document_id)
+        self._refresh_highlights()
+        self._render_segments_panel()
+        return result
 
     def add_code(self, name: str, parent_id: int | None = None) -> Code:
         if self.conn is None:
@@ -2519,6 +2614,7 @@ class MainWindow(QMainWindow):
         in_tutorial = has_project and self.project_path is None
         self.import_action.setEnabled(has_project and not in_tutorial)
         self.import_action.setText(IMPORT_LABEL_TUTORIAL if in_tutorial else IMPORT_LABEL)
+        self.merge_project_action.setEnabled(has_project and not in_tutorial)
         self.export_csv_action.setEnabled(has_project)
         self.export_json_action.setEnabled(has_project)
         self.export_codebook_action.setEnabled(has_project)
