@@ -737,3 +737,103 @@ def test_visual_mode_f_extends_selection(qtbot):
     assert viewer.mode == VimTextViewer.VISUAL
     assert viewer.textCursor().position() == 18
     assert viewer.textCursor().selectionStart() == 0
+
+
+# Qt counts an emoji as two cursor positions where Python counts one index,
+# so every motion that searches the text has to convert between the two.
+EMOJI_TEXT = "😀😀 hello world 😀 world"
+
+
+def test_search_after_emoji_selects_the_match(qtbot):
+    viewer = _make_viewer(qtbot, EMOJI_TEXT)
+    viewer.setFocus()
+
+    QTest.keyClick(viewer, Qt.Key_Slash)
+    QTest.keyClicks(viewer, "world")
+    assert viewer.textCursor().selectedText() == "world"
+
+    QTest.keyClick(viewer, Qt.Key_Return)
+    QTest.keyClick(viewer, Qt.Key_N)
+    assert viewer.textCursor().selectedText() == "world"
+    assert viewer.textCursor().selectionStart() == len("😀😀 hello world 😀 ") + 3
+
+
+def test_f_after_emoji_lands_on_the_character(qtbot):
+    viewer = _make_viewer(qtbot, EMOJI_TEXT)
+    viewer.setFocus()
+
+    QTest.keyClick(viewer, Qt.Key_F)
+    QTest.keyClicks(viewer, "w")
+    cursor = viewer.textCursor()
+    cursor.movePosition(QTextCursor.Right, QTextCursor.KeepAnchor)
+    assert cursor.selectedText() == "w"
+    first_w = cursor.selectionStart()
+
+    QTest.keyClick(viewer, Qt.Key_F)
+    QTest.keyClicks(viewer, "w")
+    QTest.keyClick(viewer, Qt.Key_F, Qt.ShiftModifier)
+    QTest.keyClicks(viewer, "w")
+    assert viewer.textCursor().position() == first_w
+
+
+def test_word_motions_after_emoji_land_on_word_boundaries(qtbot):
+    viewer = _make_viewer(qtbot, EMOJI_TEXT)
+    viewer.setFocus()
+    hello = len("😀😀 ") + 2  # Qt position of "hello"
+
+    QTest.keyClick(viewer, Qt.Key_W)
+    assert viewer.textCursor().position() == hello
+    QTest.keyClick(viewer, Qt.Key_E)
+    assert viewer.textCursor().position() == hello + 4
+    QTest.keyClick(viewer, Qt.Key_W)
+    QTest.keyClick(viewer, Qt.Key_B)
+    assert viewer.textCursor().position() == hello
+
+
+def test_dollar_reaches_the_end_of_a_line_with_emoji(qtbot):
+    viewer = _make_viewer(qtbot, "😀 hi 😀\nnext")
+    viewer.setFocus()
+
+    QTest.keyClick(viewer, Qt.Key_Dollar)
+
+    assert viewer.textCursor().position() == viewer.textCursor().block().length() - 1
+
+
+def _highlighted_span(viewer):
+    """Characters covered by the selection or the block cursor, together."""
+    cursor = viewer.textCursor()
+    selections = viewer.extraSelections()  # keeps the cursor below alive
+    block = selections[0].cursor
+    return (
+        min(cursor.selectionStart(), block.selectionStart()),
+        max(cursor.selectionEnd(), block.selectionEnd()),
+    )
+
+
+def test_block_cursor_stays_inside_a_rightward_visual_selection(qtbot):
+    viewer = _make_viewer(qtbot, "Hello frustrating world.")
+    viewer.setFocus()
+
+    QTest.keyClick(viewer, Qt.Key_V)
+    for _ in range(3):
+        QTest.keyClick(viewer, Qt.Key_L)
+
+    cursor = viewer.textCursor()
+    assert (cursor.selectionStart(), cursor.selectionEnd()) == (0, 3)
+    assert _highlighted_span(viewer) == (0, 3)
+
+
+def test_block_cursor_stays_inside_a_leftward_visual_selection(qtbot):
+    viewer = _make_viewer(qtbot, "Hello frustrating world.")
+    viewer.setFocus()
+    cursor = viewer.textCursor()
+    cursor.setPosition(5)
+    viewer.setTextCursor(cursor)
+
+    QTest.keyClick(viewer, Qt.Key_V)
+    for _ in range(3):
+        QTest.keyClick(viewer, Qt.Key_H)
+
+    cursor = viewer.textCursor()
+    assert (cursor.selectionStart(), cursor.selectionEnd()) == (2, 5)
+    assert _highlighted_span(viewer) == (2, 5)

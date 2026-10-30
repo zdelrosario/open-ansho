@@ -22,7 +22,10 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMenu,
     QMessageBox,
+    QFrame,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
     QSplitter,
     QStackedWidget,
     QTreeWidget,
@@ -39,6 +42,7 @@ from openansho import (
     project_merge,
     reporting,
     text_extract,
+    text_offsets,
     tutorial,
     user,
 )
@@ -394,12 +398,27 @@ class MainWindow(QMainWindow):
 
         self.segment_code_label = QLabel()
         self.segment_code_label.setMargin(4)
+        # A QLabel is never narrower than its whole text, so a long code name
+        # would widen this pane and squeeze the document pane. Inside a
+        # scroll area of its own it overflows instead, and follows the
+        # segment list's horizontal scrollbar the way the segments do.
+        self.segment_code_scroll = QScrollArea()
+        self.segment_code_scroll.setWidget(self.segment_code_label)
+        self.segment_code_scroll.setWidgetResizable(True)
+        self.segment_code_scroll.setFrameShape(QFrame.NoFrame)
+        self.segment_code_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.segment_code_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.segment_code_scroll.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        self.segment_code_scroll.viewport().setAutoFillBackground(False)
 
         self.segment_list = QListWidget()
         self.segment_list.setObjectName("segmentListPane")
         self.segment_list.itemDoubleClicked.connect(self._on_segment_activated)
         self.segment_list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.segment_list.customContextMenuRequested.connect(self._on_segment_list_context_menu)
+        self.segment_list.horizontalScrollBar().valueChanged.connect(
+            self.segment_code_scroll.horizontalScrollBar().setValue
+        )
 
         self.user_filter_combo = CheckableComboBox()
         self.user_filter_combo.model().dataChanged.connect(self._on_user_filter_changed)
@@ -425,7 +444,7 @@ class MainWindow(QMainWindow):
         segments_layout.setContentsMargins(0, 0, 0, 0)
         segments_layout.addWidget(QLabel("Coded Segments"))
         segments_layout.addWidget(self.user_filter_combo)
-        segments_layout.addWidget(self.segment_code_label)
+        segments_layout.addWidget(self.segment_code_scroll)
         segments_layout.addWidget(self.segment_list)
         code_splitter.addWidget(segments_container)
 
@@ -1344,6 +1363,7 @@ class MainWindow(QMainWindow):
         )
         self.viewer.set_theme(self._dark_mode)
         self.pdf_viewer.set_theme(self._dark_mode)
+        self._fit_segment_code_scroll()
 
     @property
     def font_scale_percent(self) -> int:
@@ -1715,7 +1735,8 @@ class MainWindow(QMainWindow):
                 db.delete_region(self.conn, region.id)  # the marker itself is gone
                 continue
             new_offset = region.text_offset + delta
-            if content[new_offset : new_offset + 1] != pdf_extract.REGION_MARKER:
+            marker = text_offsets.qt_slice(content, new_offset, new_offset + 1)
+            if marker != pdf_extract.REGION_MARKER:
                 db.delete_region(self.conn, region.id)
             elif new_offset != region.text_offset:
                 db.update_region_offset(self.conn, region.id, new_offset)
@@ -1814,8 +1835,9 @@ class MainWindow(QMainWindow):
         content = self.active_viewer.toPlainText()
         existing = db.list_regions_for_page(self.conn, self._current_document_id, page)
         insert_index = sum(1 for region in existing if (region.y, region.x) < (top, left))
-        position = pdf_extract.region_marker_position(
-            content, page, len(existing), insert_index
+        position = text_offsets.to_qt_position(
+            content,
+            pdf_extract.region_marker_position(content, page, len(existing), insert_index),
         )
 
         self.active_viewer.replace_text(position, 0, pdf_extract.REGION_MARKER_LINE)
@@ -1847,14 +1869,14 @@ class MainWindow(QMainWindow):
             return
         content = self.active_viewer.toPlainText()
         offset = region.text_offset
-        if content[offset : offset + 1] != pdf_extract.REGION_MARKER:
+        if text_offsets.qt_slice(content, offset, offset + 1) != pdf_extract.REGION_MARKER:
             # Nothing to splice out; drop the row and leave the text alone.
             db.delete_region(self.conn, region_id)
             self._refresh_highlights()
             return
         # The marker is followed by its own newline (REGION_MARKER_LINE); an
         # insert-mode edit could have taken that newline away, so check.
-        length = 2 if content[offset + 1 : offset + 2] == "\n" else 1
+        length = 2 if text_offsets.qt_slice(content, offset + 1, offset + 2) == "\n" else 1
 
         db.delete_region(self.conn, region_id)
         self.active_viewer.replace_text(offset, length, "")
@@ -2198,9 +2220,10 @@ class MainWindow(QMainWindow):
                 item = QTreeWidgetItem([code.name, count_label])
                 item.setData(0, Qt.UserRole, code.id)
                 item.setTextAlignment(1, Qt.AlignRight | Qt.AlignVCenter)
-                tooltip = code.description.strip() if code.description else ""
-                item.setToolTip(0, tooltip or "(No code description)")
-                item.setToolTip(1, tooltip or "(No code description)")
+                description = code.description.strip() if code.description else ""
+                tooltip = f"{code.name}\n{description or '(No code description)'}"
+                item.setToolTip(0, tooltip)
+                item.setToolTip(1, tooltip)
                 if code.color:
                     item.setBackground(0, QColor(code.color))
                 self._code_items_by_id[code.id] = item
@@ -2332,11 +2355,34 @@ class MainWindow(QMainWindow):
         position = cursor.position()
         return [s for s in all_segments if s.start_offset <= position < s.end_offset]
 
+    def _show_segment_code(self, code: Code | None) -> None:
+        """Name `code` in its color above the segment list, or show nothing."""
+        label = self.segment_code_label
+        if code is None:
+            label.clear()
+            label.setStyleSheet("")
+        else:
+            label.setText(code.name)
+            label.setStyleSheet(
+                f"background-color: {code.color}; color: {CODE_NAME_TEXT_COLOR.name()}; "
+                "border-radius: 3px;"
+                if code.color
+                else ""
+            )
+        self._fit_segment_code_scroll()
+        self.segment_code_scroll.horizontalScrollBar().setValue(
+            self.segment_list.horizontalScrollBar().value()
+        )
+
+    def _fit_segment_code_scroll(self) -> None:
+        # A scroll area doesn't follow its widget's size on its own, so it
+        # has to be told whenever the label's text or font changes.
+        self.segment_code_scroll.setFixedHeight(self.segment_code_label.sizeHint().height())
+
     def _render_segments_panel(self) -> None:
         self.segment_list.clear()
         if self.conn is None:
-            self.segment_code_label.clear()
-            self.segment_code_label.setStyleSheet("")
+            self._show_segment_code(None)
             return
 
         selected_usernames = self._selected_usernames()
@@ -2357,8 +2403,7 @@ class MainWindow(QMainWindow):
         # coded span does. A codebook click lists that code's segments from
         # every selected user either way.
         if self._segments_panel_mode == "cursor":
-            self.segment_code_label.clear()
-            self.segment_code_label.setStyleSheet("")
+            self._show_segment_code(None)
             segments = [
                 segment
                 for segment in self._segments_overlapping_viewer_selection()
@@ -2376,17 +2421,10 @@ class MainWindow(QMainWindow):
             else None
         )
         if code is None:
-            self.segment_code_label.clear()
-            self.segment_code_label.setStyleSheet("")
+            self._show_segment_code(None)
             return
 
-        self.segment_code_label.setText(code.name)
-        self.segment_code_label.setStyleSheet(
-            f"background-color: {code.color}; color: {CODE_NAME_TEXT_COLOR.name()}; "
-            "border-radius: 3px;"
-            if code.color
-            else ""
-        )
+        self._show_segment_code(code)
 
         segments = [
             segment

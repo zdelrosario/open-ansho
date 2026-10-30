@@ -49,17 +49,17 @@ def test_edit_code_description_updates_tooltip(qtbot, tmp_path):
 
     code = window.add_code("Frustration")
     item = window.code_tree.topLevelItem(0)
-    assert item.toolTip(0) == "(No code description)"
+    assert item.toolTip(0) == "Frustration\n(No code description)"
 
     updated = window.edit_code_description(code.id, "Expressions of frustration.")
 
     assert updated.description == "Expressions of frustration."
     item = window.code_tree.topLevelItem(0)
-    assert item.toolTip(0) == "Expressions of frustration."
+    assert item.toolTip(0) == "Frustration\nExpressions of frustration."
 
     window.edit_code_description(code.id, "")
     item = window.code_tree.topLevelItem(0)
-    assert item.toolTip(0) == "(No code description)"
+    assert item.toolTip(0) == "Frustration\n(No code description)"
 
 
 def test_set_code_base_color_assigns_chosen_class(qtbot, tmp_path):

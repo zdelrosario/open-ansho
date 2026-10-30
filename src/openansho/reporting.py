@@ -11,7 +11,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-from openansho import db
+from openansho import db, text_offsets
 from openansho.db import Code
 
 CSV_FIELDNAMES = [
@@ -45,15 +45,17 @@ def segment_text(
     every marker inside the span is replaced by a description of the region
     it stands for instead.
     """
-    text = document.content[segment.start_offset : segment.end_offset]
+    text = text_offsets.qt_slice(document.content, segment.start_offset, segment.end_offset)
     if not regions_by_offset:
         return text
     pieces = []
-    for offset, character in enumerate(text, start=segment.start_offset):
+    offset = segment.start_offset
+    for character in text:
         region = regions_by_offset.get(offset)
         pieces.append(
             f"[image region, page {region.page + 1}]" if region is not None else character
         )
+        offset += text_offsets.qt_width(character)
     return "".join(pieces)
 
 

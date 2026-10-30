@@ -279,9 +279,16 @@ class VimTextViewer(VimTextNavigation, QPlainTextEdit):
         super().setExtraSelections([self._cursor_highlight_selection()])
 
     def _cursor_highlight_selection(self) -> QTextEdit.ExtraSelection:
-        block_cursor = QTextCursor(self.textCursor())
+        text_cursor = self.textCursor()
+        block_cursor = QTextCursor(text_cursor)
         block_cursor.clearSelection()
-        if block_cursor.atEnd():
+        if text_cursor.hasSelection() and text_cursor.position() == text_cursor.selectionEnd():
+            # A selection extended rightward ends just before the cursor, so
+            # the character ahead of it is not part of what would be coded;
+            # sit on the last selected character so the highlight shows the
+            # selection exactly.
+            block_cursor.movePosition(QTextCursor.PreviousCharacter, QTextCursor.KeepAnchor)
+        elif block_cursor.atEnd():
             # No character to highlight ahead of the cursor; fall back to the
             # character behind it so the block cursor stays visible at the
             # very end of the document instead of disappearing.

@@ -367,3 +367,66 @@ def test_apply_code_button_noop_without_selection(qtbot, tmp_path, monkeypatch):
 
     assert shown
     assert db.list_segments_for_document(window.conn, window._current_document_id) == []
+
+
+def test_segment_list_shows_the_highlighted_text_after_an_emoji(qtbot, tmp_path):
+    # Qt counts a character outside the Basic Multilingual Plane as two
+    # cursor positions, Python as one index; the segment list has to show
+    # the same text the highlight covers.
+    window = MainWindow()
+    qtbot.addWidget(window)
+    _open_project_with_document(window, tmp_path, content="Wow 😀😀 so frustrating today.")
+    code = window.add_code("Frustration")
+
+    viewer = window.active_viewer
+    start = viewer.toPlainText().index("frustrating")
+    cursor = viewer.textCursor()
+    cursor.setPosition(viewer.document().find("frustrating").selectionStart())
+    cursor.movePosition(QTextCursor.Right, QTextCursor.KeepAnchor, len("frustrating"))
+    viewer.setTextCursor(cursor)
+    assert cursor.selectedText() == "frustrating"
+    assert cursor.selectionStart() == start + 2  # the two emoji, counted twice
+    window._apply_code_to_viewer_selection(code.id)
+
+    window._show_segments_for_code(code.id)
+    assert window.segment_list.count() == 1
+    assert window.segment_list.item(0).text().startswith("“frustrating”")
+
+
+def test_long_code_name_overflows_instead_of_widening_the_segments_pane(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    _open_project_with_document(window, tmp_path, content="Hello " + "word " * 200)
+    window.resize(1200, 800)
+    window.show()
+    qtbot.waitExposed(window)
+    segments_pane = window.segment_list.parentWidget()
+    width_before = segments_pane.minimumSizeHint().width()
+
+    code = window.add_code("A very long code name " * 20)
+    window.apply_segment(code.id, 0, 1000)  # a segment wide enough to scroll
+    window._show_segments_for_code(code.id)
+
+    assert window.segment_code_label.text() == code.name
+    assert segments_pane.minimumSizeHint().width() == width_before
+    assert window.segment_code_scroll.height() == window.segment_code_label.sizeHint().height()
+
+    list_scroll = window.segment_list.horizontalScrollBar()
+    window.segment_list.setFixedWidth(150)  # narrower than the segment's snippet
+    qtbot.waitUntil(lambda: list_scroll.maximum() > 0)
+    list_scroll.setValue(list_scroll.maximum() // 2)
+    assert window.segment_code_scroll.horizontalScrollBar().value() == list_scroll.value()
+
+
+def test_code_name_height_follows_font_size(qtbot, tmp_path):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    _open_project_with_document(window, tmp_path)
+    code = window.add_code("Frustration")
+    window._show_segments_for_code(code.id)
+    height_before = window.segment_code_scroll.height()
+
+    window.set_font_scale(window.font_scale_percent * 2)
+
+    assert window.segment_code_scroll.height() > height_before
+    assert window.segment_code_scroll.height() == window.segment_code_label.sizeHint().height()
