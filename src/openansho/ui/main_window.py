@@ -2220,9 +2220,10 @@ class MainWindow(QMainWindow):
                 item = QTreeWidgetItem([code.name, count_label])
                 item.setData(0, Qt.UserRole, code.id)
                 item.setTextAlignment(1, Qt.AlignRight | Qt.AlignVCenter)
-                tooltip = code.description.strip() if code.description else ""
-                item.setToolTip(0, tooltip or "(No code description)")
-                item.setToolTip(1, tooltip or "(No code description)")
+                description = code.description.strip() if code.description else ""
+                tooltip = f"{code.name}\n{description or '(No code description)'}"
+                item.setToolTip(0, tooltip)
+                item.setToolTip(1, tooltip)
                 if code.color:
                     item.setBackground(0, QColor(code.color))
                 self._code_items_by_id[code.id] = item
