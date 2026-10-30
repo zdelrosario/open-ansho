@@ -33,6 +33,8 @@ import re
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QTextCursor
 
+from openansho import text_offsets
+
 
 class VimTextNavigation:
     """Vim-style modes, motions and search for a widget with a text cursor."""
@@ -319,7 +321,7 @@ class VimTextNavigation:
         block = self.textCursor().block()
         cursor = self.textCursor()
         cursor.setPosition(block.position())
-        cursor.setPosition(block.position() + len(block.text()), QTextCursor.KeepAnchor)
+        cursor.setPosition(block.position() + block.length() - 1, QTextCursor.KeepAnchor)
         self.setTextCursor(cursor)
 
     def _enter_search_mode(self) -> None:
@@ -369,7 +371,7 @@ class VimTextNavigation:
             match = self._find_match(regex, self._search_origin, forward=True)
             if match is not None:
                 cursor = self.textCursor()
-                cursor.setPosition(match.start())
+                cursor.setPosition(text_offsets.to_qt_position(match.string, match.start()))
                 self.setTextCursor(cursor)
                 self.ensureCursorVisible()
             self._report_search_match(self._search_pattern, match)
@@ -433,8 +435,10 @@ class VimTextNavigation:
 
     def _select_match(self, match: re.Match) -> None:
         cursor = self.textCursor()
-        cursor.setPosition(match.start())
-        cursor.setPosition(match.end(), QTextCursor.KeepAnchor)
+        cursor.setPosition(text_offsets.to_qt_position(match.string, match.start()))
+        cursor.setPosition(
+            text_offsets.to_qt_position(match.string, match.end()), QTextCursor.KeepAnchor
+        )
         self.setTextCursor(cursor)
         self.ensureCursorVisible()
 
@@ -452,17 +456,19 @@ class VimTextNavigation:
             return None
 
     def _find_match(self, regex: re.Pattern, from_pos: int, forward: bool) -> re.Match | None:
-        """Nearest match to `from_pos`, wrapping around the document if needed."""
-        matches = list(regex.finditer(self.toPlainText()))
+        """Nearest match to cursor position `from_pos`, wrapping around the document if needed."""
+        text = self.toPlainText()
+        matches = list(regex.finditer(text))
         if not matches:
             return None
+        from_index = text_offsets.from_qt_position(text, from_pos)
         if forward:
             for match in matches:
-                if match.start() >= from_pos:
+                if match.start() >= from_index:
                     return match
             return matches[0]
         for match in reversed(matches):
-            if match.start() < from_pos:
+            if match.start() < from_index:
                 return match
         return matches[-1]
 
@@ -487,7 +493,7 @@ class VimTextNavigation:
 
     def _move_to_line_end(self) -> None:
         block = self.textCursor().block()
-        self._set_position(block.position() + len(block.text()))
+        self._set_position(block.position() + block.length() - 1)
 
     def _move_down_line(self) -> None:
         cursor = self.textCursor()
@@ -496,7 +502,7 @@ class VimTextNavigation:
         if not next_block.isValid():
             return
         column = cursor.position() - block.position()
-        self._set_position(next_block.position() + min(column, len(next_block.text())))
+        self._set_position(next_block.position() + min(column, next_block.length() - 1))
 
     def _move_up_line(self) -> None:
         cursor = self.textCursor()
@@ -505,7 +511,7 @@ class VimTextNavigation:
         if not previous_block.isValid():
             return
         column = cursor.position() - block.position()
-        self._set_position(previous_block.position() + min(column, len(previous_block.text())))
+        self._set_position(previous_block.position() + min(column, previous_block.length() - 1))
 
     def _move_to_word_end(self, is_token_char) -> None:
         """Handle the `e`/`E` motions.
@@ -521,20 +527,32 @@ class VimTextNavigation:
             return
         cursor = self.textCursor()
         if self.mode == self.VISUAL:
-            cursor.setPosition(last_char_index + 1, QTextCursor.KeepAnchor)
+            cursor.setPosition(self._qt_position(last_char_index + 1), QTextCursor.KeepAnchor)
         else:
-            cursor.setPosition(last_char_index, QTextCursor.MoveAnchor)
+            cursor.setPosition(self._qt_position(last_char_index), QTextCursor.MoveAnchor)
         self.setTextCursor(cursor)
 
     def _move_to_next_word_start(self, is_token_char) -> None:
-        new_position = self._next_token_start_index(is_token_char)
-        if new_position is not None:
-            self._set_position(new_position)
+        new_index = self._next_token_start_index(is_token_char)
+        if new_index is not None:
+            self._set_position(self._qt_position(new_index))
 
     def _move_to_previous_word_start(self, is_token_char) -> None:
-        new_position = self._previous_token_start_index(is_token_char)
-        if new_position is not None:
-            self._set_position(new_position)
+        new_index = self._previous_token_start_index(is_token_char)
+        if new_index is not None:
+            self._set_position(self._qt_position(new_index))
+
+    def _text_and_cursor_index(self) -> tuple[str, int]:
+        """The host's text, and the cursor's index into it as a Python `str`.
+
+        Qt positions count an emoji as two characters; see `text_offsets`.
+        """
+        text = self.toPlainText()
+        return text, text_offsets.from_qt_position(text, self.textCursor().position())
+
+    def _qt_position(self, index: int) -> int:
+        """The cursor position of Python index `index` into the host's text."""
+        return text_offsets.to_qt_position(self.toPlainText(), index)
 
     def _set_position(self, position: int) -> None:
         cursor = self.textCursor()
@@ -564,8 +582,7 @@ class VimTextNavigation:
         of `char` anywhere in the document (case-sensitive), crossing line
         boundaries freely.
         """
-        text = self.toPlainText()
-        position = self.textCursor().position()
+        text, position = self._text_and_cursor_index()
 
         if direction > 0:
             index = text.find(char, position + 1)
@@ -573,7 +590,7 @@ class VimTextNavigation:
             index = text.rfind(char, 0, position)
         if index == -1:
             return
-        self._set_position(index)
+        self._set_position(text_offsets.to_qt_position(text, index))
 
     def _end_of_token_index(self, is_token_char) -> int | None:
         """String index of the last character of the current/next token.
@@ -584,12 +601,12 @@ class VimTextNavigation:
         stopping partway through, whether that's a single space or a run
         of punctuation and whitespace together.
         """
-        text = self.toPlainText()
+        text, index = self._text_and_cursor_index()
         length = len(text)
         if length == 0:
             return None
 
-        index = self.textCursor().position() + 1
+        index += 1
         while index < length and not is_token_char(text[index]):
             index += 1
         if index >= length:
@@ -601,12 +618,11 @@ class VimTextNavigation:
 
     def _next_token_start_index(self, is_token_char) -> int | None:
         """String index of the start of the next token (vim's w/W)."""
-        text = self.toPlainText()
+        text, index = self._text_and_cursor_index()
         length = len(text)
         if length == 0:
             return None
 
-        index = self.textCursor().position()
         if index < length and is_token_char(text[index]):
             while index < length and is_token_char(text[index]):
                 index += 1
@@ -618,8 +634,8 @@ class VimTextNavigation:
 
     def _previous_token_start_index(self, is_token_char) -> int | None:
         """String index of the start of the previous token (vim's b/B)."""
-        text = self.toPlainText()
-        index = self.textCursor().position() - 1
+        text, index = self._text_and_cursor_index()
+        index -= 1
         if index < 0:
             return None
 

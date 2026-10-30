@@ -39,6 +39,7 @@ from openansho import (
     project_merge,
     reporting,
     text_extract,
+    text_offsets,
     tutorial,
     user,
 )
@@ -1715,7 +1716,8 @@ class MainWindow(QMainWindow):
                 db.delete_region(self.conn, region.id)  # the marker itself is gone
                 continue
             new_offset = region.text_offset + delta
-            if content[new_offset : new_offset + 1] != pdf_extract.REGION_MARKER:
+            marker = text_offsets.qt_slice(content, new_offset, new_offset + 1)
+            if marker != pdf_extract.REGION_MARKER:
                 db.delete_region(self.conn, region.id)
             elif new_offset != region.text_offset:
                 db.update_region_offset(self.conn, region.id, new_offset)
@@ -1814,8 +1816,9 @@ class MainWindow(QMainWindow):
         content = self.active_viewer.toPlainText()
         existing = db.list_regions_for_page(self.conn, self._current_document_id, page)
         insert_index = sum(1 for region in existing if (region.y, region.x) < (top, left))
-        position = pdf_extract.region_marker_position(
-            content, page, len(existing), insert_index
+        position = text_offsets.to_qt_position(
+            content,
+            pdf_extract.region_marker_position(content, page, len(existing), insert_index),
         )
 
         self.active_viewer.replace_text(position, 0, pdf_extract.REGION_MARKER_LINE)
@@ -1847,14 +1850,14 @@ class MainWindow(QMainWindow):
             return
         content = self.active_viewer.toPlainText()
         offset = region.text_offset
-        if content[offset : offset + 1] != pdf_extract.REGION_MARKER:
+        if text_offsets.qt_slice(content, offset, offset + 1) != pdf_extract.REGION_MARKER:
             # Nothing to splice out; drop the row and leave the text alone.
             db.delete_region(self.conn, region_id)
             self._refresh_highlights()
             return
         # The marker is followed by its own newline (REGION_MARKER_LINE); an
         # insert-mode edit could have taken that newline away, so check.
-        length = 2 if content[offset + 1 : offset + 2] == "\n" else 1
+        length = 2 if text_offsets.qt_slice(content, offset + 1, offset + 2) == "\n" else 1
 
         db.delete_region(self.conn, region_id)
         self.active_viewer.replace_text(offset, length, "")

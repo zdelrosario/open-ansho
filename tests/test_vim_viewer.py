@@ -737,3 +737,63 @@ def test_visual_mode_f_extends_selection(qtbot):
     assert viewer.mode == VimTextViewer.VISUAL
     assert viewer.textCursor().position() == 18
     assert viewer.textCursor().selectionStart() == 0
+
+
+# Qt counts an emoji as two cursor positions where Python counts one index,
+# so every motion that searches the text has to convert between the two.
+EMOJI_TEXT = "😀😀 hello world 😀 world"
+
+
+def test_search_after_emoji_selects_the_match(qtbot):
+    viewer = _make_viewer(qtbot, EMOJI_TEXT)
+    viewer.setFocus()
+
+    QTest.keyClick(viewer, Qt.Key_Slash)
+    QTest.keyClicks(viewer, "world")
+    assert viewer.textCursor().selectedText() == "world"
+
+    QTest.keyClick(viewer, Qt.Key_Return)
+    QTest.keyClick(viewer, Qt.Key_N)
+    assert viewer.textCursor().selectedText() == "world"
+    assert viewer.textCursor().selectionStart() == len("😀😀 hello world 😀 ") + 3
+
+
+def test_f_after_emoji_lands_on_the_character(qtbot):
+    viewer = _make_viewer(qtbot, EMOJI_TEXT)
+    viewer.setFocus()
+
+    QTest.keyClick(viewer, Qt.Key_F)
+    QTest.keyClicks(viewer, "w")
+    cursor = viewer.textCursor()
+    cursor.movePosition(QTextCursor.Right, QTextCursor.KeepAnchor)
+    assert cursor.selectedText() == "w"
+    first_w = cursor.selectionStart()
+
+    QTest.keyClick(viewer, Qt.Key_F)
+    QTest.keyClicks(viewer, "w")
+    QTest.keyClick(viewer, Qt.Key_F, Qt.ShiftModifier)
+    QTest.keyClicks(viewer, "w")
+    assert viewer.textCursor().position() == first_w
+
+
+def test_word_motions_after_emoji_land_on_word_boundaries(qtbot):
+    viewer = _make_viewer(qtbot, EMOJI_TEXT)
+    viewer.setFocus()
+    hello = len("😀😀 ") + 2  # Qt position of "hello"
+
+    QTest.keyClick(viewer, Qt.Key_W)
+    assert viewer.textCursor().position() == hello
+    QTest.keyClick(viewer, Qt.Key_E)
+    assert viewer.textCursor().position() == hello + 4
+    QTest.keyClick(viewer, Qt.Key_W)
+    QTest.keyClick(viewer, Qt.Key_B)
+    assert viewer.textCursor().position() == hello
+
+
+def test_dollar_reaches_the_end_of_a_line_with_emoji(qtbot):
+    viewer = _make_viewer(qtbot, "😀 hi 😀\nnext")
+    viewer.setFocus()
+
+    QTest.keyClick(viewer, Qt.Key_Dollar)
+
+    assert viewer.textCursor().position() == viewer.textCursor().block().length() - 1

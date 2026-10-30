@@ -233,3 +233,12 @@ def test_export_codebook_csv(conn, tmp_path):
         "description": "",
     }
     assert rows[2]["description"] == "Positive payoff"
+
+
+def test_segment_text_counts_astral_characters_as_qt_does(conn):
+    # Offsets come from Qt text cursors, where an emoji is two positions.
+    doc = db.create_document(conn, "chat.txt", "😀 so frustrating")
+    code = db.create_code(conn, "Frustration")
+    segment = db.create_segment(conn, doc.id, code.id, 6, 17)
+
+    assert reporting.segment_text(doc, segment, {}) == "frustrating"

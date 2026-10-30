@@ -367,3 +367,27 @@ def test_apply_code_button_noop_without_selection(qtbot, tmp_path, monkeypatch):
 
     assert shown
     assert db.list_segments_for_document(window.conn, window._current_document_id) == []
+
+
+def test_segment_list_shows_the_highlighted_text_after_an_emoji(qtbot, tmp_path):
+    # Qt counts a character outside the Basic Multilingual Plane as two
+    # cursor positions, Python as one index; the segment list has to show
+    # the same text the highlight covers.
+    window = MainWindow()
+    qtbot.addWidget(window)
+    _open_project_with_document(window, tmp_path, content="Wow 😀😀 so frustrating today.")
+    code = window.add_code("Frustration")
+
+    viewer = window.active_viewer
+    start = viewer.toPlainText().index("frustrating")
+    cursor = viewer.textCursor()
+    cursor.setPosition(viewer.document().find("frustrating").selectionStart())
+    cursor.movePosition(QTextCursor.Right, QTextCursor.KeepAnchor, len("frustrating"))
+    viewer.setTextCursor(cursor)
+    assert cursor.selectedText() == "frustrating"
+    assert cursor.selectionStart() == start + 2  # the two emoji, counted twice
+    window._apply_code_to_viewer_selection(code.id)
+
+    window._show_segments_for_code(code.id)
+    assert window.segment_list.count() == 1
+    assert window.segment_list.item(0).text().startswith("“frustrating”")
