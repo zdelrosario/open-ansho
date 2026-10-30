@@ -797,3 +797,43 @@ def test_dollar_reaches_the_end_of_a_line_with_emoji(qtbot):
     QTest.keyClick(viewer, Qt.Key_Dollar)
 
     assert viewer.textCursor().position() == viewer.textCursor().block().length() - 1
+
+
+def _highlighted_span(viewer):
+    """Characters covered by the selection or the block cursor, together."""
+    cursor = viewer.textCursor()
+    selections = viewer.extraSelections()  # keeps the cursor below alive
+    block = selections[0].cursor
+    return (
+        min(cursor.selectionStart(), block.selectionStart()),
+        max(cursor.selectionEnd(), block.selectionEnd()),
+    )
+
+
+def test_block_cursor_stays_inside_a_rightward_visual_selection(qtbot):
+    viewer = _make_viewer(qtbot, "Hello frustrating world.")
+    viewer.setFocus()
+
+    QTest.keyClick(viewer, Qt.Key_V)
+    for _ in range(3):
+        QTest.keyClick(viewer, Qt.Key_L)
+
+    cursor = viewer.textCursor()
+    assert (cursor.selectionStart(), cursor.selectionEnd()) == (0, 3)
+    assert _highlighted_span(viewer) == (0, 3)
+
+
+def test_block_cursor_stays_inside_a_leftward_visual_selection(qtbot):
+    viewer = _make_viewer(qtbot, "Hello frustrating world.")
+    viewer.setFocus()
+    cursor = viewer.textCursor()
+    cursor.setPosition(5)
+    viewer.setTextCursor(cursor)
+
+    QTest.keyClick(viewer, Qt.Key_V)
+    for _ in range(3):
+        QTest.keyClick(viewer, Qt.Key_H)
+
+    cursor = viewer.textCursor()
+    assert (cursor.selectionStart(), cursor.selectionEnd()) == (2, 5)
+    assert _highlighted_span(viewer) == (2, 5)
