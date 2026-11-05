@@ -293,6 +293,22 @@ def test_visual_mode_selects_text_on_the_page(qtbot, tmp_path, write_pdf):
     assert cursor.selectedText() == "First"
 
 
+def test_visual_mode_f_includes_the_match_in_the_pdf_pane(qtbot, tmp_path, write_pdf):
+    window = open_pdf(qtbot, tmp_path, write_pdf)
+    viewer = window.pdf_viewer
+    viewer.setFocus()
+    qtbot.waitUntil(lambda: viewer.hasFocus())
+
+    QTest.keyClick(viewer, Qt.Key_V)
+    QTest.keyClick(viewer, Qt.Key_F)
+    QTest.keyClicks(viewer, "p")
+    assert viewer.textCursor().selectedText() == "First p"
+
+    QTest.keyClick(viewer, Qt.Key_F, Qt.ShiftModifier)
+    QTest.keyClicks(viewer, "t")
+    assert viewer.textCursor().selectedText() == "First"
+
+
 def test_search_works_in_the_pdf_pane(qtbot, tmp_path, write_pdf):
     window = open_pdf(qtbot, tmp_path, write_pdf)
     viewer = window.pdf_viewer

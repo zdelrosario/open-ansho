@@ -581,8 +581,23 @@ class VimTextNavigation:
         """Handle the `f`/`F` motions: jump to the next/previous occurrence
         of `char` anywhere in the document (case-sensitive), crossing line
         boundaries freely.
+
+        In visual mode the matched character is always part of the
+        selection, in either direction (vim treats `f`/`F` as inclusive).
+        Selections are half-open `[anchor, position)`, so a match at or
+        after the anchor puts the cursor one past it, and a match before
+        the anchor puts the cursor on it. Likewise, a selection extending
+        forward already includes the character just before the cursor, so
+        that character is where the search starts from — otherwise a
+        repeated `f` would skip an adjacent match, and an `F` would just
+        re-find the character it is sitting on.
         """
         text, position = self._text_and_cursor_index()
+        cursor = self.textCursor()
+        visual = self.mode == self.VISUAL
+        anchor = text_offsets.from_qt_position(text, cursor.anchor())
+        if visual and position > anchor:
+            position -= 1  # the character the cursor is visually "on"
 
         if direction > 0:
             index = text.find(char, position + 1)
@@ -590,7 +605,8 @@ class VimTextNavigation:
             index = text.rfind(char, 0, position)
         if index == -1:
             return
-        self._set_position(text_offsets.to_qt_position(text, index))
+        target = index + 1 if visual and index >= anchor else index
+        self._set_position(text_offsets.to_qt_position(text, target))
 
     def _end_of_token_index(self, is_token_char) -> int | None:
         """String index of the last character of the current/next token.

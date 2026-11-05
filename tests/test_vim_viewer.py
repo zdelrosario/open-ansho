@@ -735,8 +735,50 @@ def test_visual_mode_f_extends_selection(qtbot):
     QTest.keyClicks(viewer, "w")
 
     assert viewer.mode == VimTextViewer.VISUAL
-    assert viewer.textCursor().position() == 18
-    assert viewer.textCursor().selectionStart() == 0
+    assert viewer.textCursor().selectedText() == "Hello frustrating w"
+
+
+def test_visual_mode_repeated_f_does_not_skip_an_adjacent_match(qtbot):
+    viewer = _make_viewer(qtbot, "a bb c")
+    viewer.setFocus()
+
+    QTest.keyClick(viewer, Qt.Key_V)
+    QTest.keyClick(viewer, Qt.Key_F)
+    QTest.keyClicks(viewer, "b")
+    assert viewer.textCursor().selectedText() == "a b"
+    QTest.keyClick(viewer, Qt.Key_F)
+    QTest.keyClicks(viewer, "b")
+    assert viewer.textCursor().selectedText() == "a bb"
+
+
+def test_visual_mode_capital_f_includes_the_match(qtbot):
+    viewer = _make_viewer(qtbot, "Hello frustrating world.")
+    viewer.setFocus()
+    cursor = viewer.textCursor()
+    cursor.setPosition(20)
+    viewer.setTextCursor(cursor)
+
+    QTest.keyClick(viewer, Qt.Key_V)
+    QTest.keyClick(viewer, Qt.Key_F, Qt.ShiftModifier)
+    QTest.keyClicks(viewer, "r")
+
+    assert viewer.textCursor().selectedText() == "rating wo"
+
+
+def test_visual_mode_capital_f_after_f_steps_back_to_the_previous_match(qtbot):
+    viewer = _make_viewer(qtbot, "Hello frustrating world.")
+    viewer.setFocus()
+
+    QTest.keyClick(viewer, Qt.Key_V)
+    QTest.keyClick(viewer, Qt.Key_F)
+    QTest.keyClicks(viewer, "r")
+    QTest.keyClick(viewer, Qt.Key_F)
+    QTest.keyClicks(viewer, "r")
+    assert viewer.textCursor().selectedText() == "Hello frustr"
+
+    QTest.keyClick(viewer, Qt.Key_F, Qt.ShiftModifier)
+    QTest.keyClicks(viewer, "r")
+    assert viewer.textCursor().selectedText() == "Hello fr"
 
 
 # Qt counts an emoji as two cursor positions where Python counts one index,
