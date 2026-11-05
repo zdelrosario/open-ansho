@@ -11,7 +11,8 @@ A host must be a QWidget that provides:
   with QPlainTextEdit's meaning. A pane that isn't a text widget can back
   these with a QTextDocument of its own, as `PdfViewer` does.
 - `ensureCursorVisible()` and `centerCursor()`.
-- `_visible_line_starts()`, `_scroll_current_line_to_top()`,
+- `_visible_lines()` (each fully visible display line as
+  `(start position, top, bottom)` in viewport pixels), `_scroll_current_line_to_top()`,
   `_scroll_current_line_to_bottom()` and `_scroll_viewport_lines(delta)` —
   the motions whose meaning depends on how the pane lays its content out.
 - `modeChanged`, `searchTextChanged` and `searchMatchChanged` signals. They are declared on each
@@ -561,20 +562,28 @@ class VimTextNavigation:
         self.setTextCursor(cursor)
 
 
+    # H/L/M pick by geometry rather than by position in the list: a host's
+    # lines need not be evenly spaced (a PDF's line heights vary, and pages
+    # have gaps between them), so "the middle entry" isn't the middle of the
+    # viewport. Only *fully* visible lines are offered, so landing on one
+    # never makes the pane scroll to show the cursor.
+
     def _jump_to_first_visible_line(self) -> None:
-        starts = self._visible_line_starts()
-        if starts:
-            self._set_position(starts[0])
+        lines = self._visible_lines()
+        if lines:
+            self._set_position(min(lines, key=lambda line: line[1])[0])
 
     def _jump_to_last_visible_line(self) -> None:
-        starts = self._visible_line_starts()
-        if starts:
-            self._set_position(starts[-1])
+        lines = self._visible_lines()
+        if lines:
+            self._set_position(max(lines, key=lambda line: line[2])[0])
 
     def _jump_to_middle_visible_line(self) -> None:
-        starts = self._visible_line_starts()
-        if starts:
-            self._set_position(starts[len(starts) // 2])
+        lines = self._visible_lines()
+        if lines:
+            middle = self.viewport().height() / 2
+            closest = min(lines, key=lambda line: abs((line[1] + line[2]) / 2 - middle))
+            self._set_position(closest[0])
 
 
     def _find_char(self, char: str, direction: int) -> None:

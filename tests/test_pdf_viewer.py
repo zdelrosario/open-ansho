@@ -462,3 +462,47 @@ def test_a_pane_with_no_document_paints_nothing_and_stays_quiet(qtbot):
     assert pane.viewer.page_count == 0
     assert pane.viewer.page_rect(0).isEmpty()
     assert pane.viewer.region_at(QPoint(5, 5)) is None
+
+
+# -- H / L / M ----------------------------------------------------------------
+
+MANY_LINES = [[f"Page {page} line {line}." for line in range(30)] for page in range(2)]
+
+
+def _cut_through_a_line(viewer):
+    """Shrink the viewport so its bottom edge cuts through a line of text."""
+    lines = viewer._visible_lines()
+    top, bottom = lines[len(lines) // 2][1:]
+    viewer.viewport().resize(viewer.viewport().width(), int((top + bottom) / 2))
+    viewer.resize(viewer.width(), viewer.viewport().height() + 20)
+
+
+def test_capital_l_does_not_scroll_the_pdf_pane(qtbot, tmp_path, write_pdf):
+    window = open_pdf(qtbot, tmp_path, write_pdf, pages=MANY_LINES)
+    viewer = window.pdf_viewer
+    viewer.setFocus()
+    qtbot.waitUntil(lambda: viewer.hasFocus())
+    _cut_through_a_line(viewer)
+    viewer.verticalScrollBar().setValue(37)
+
+    QTest.keyClick(viewer, Qt.Key_L, Qt.ShiftModifier)
+
+    assert viewer.verticalScrollBar().value() == 37
+    rect = viewer._cursor_rect()
+    assert 0 <= rect.top() and rect.bottom() <= viewer.viewport().height()
+
+
+def test_capital_m_lands_mid_viewport_in_the_pdf_pane(qtbot, tmp_path, write_pdf):
+    window = open_pdf(qtbot, tmp_path, write_pdf, pages=MANY_LINES)
+    viewer = window.pdf_viewer
+    viewer.setFocus()
+    qtbot.waitUntil(lambda: viewer.hasFocus())
+    viewer.verticalScrollBar().setValue(37)
+
+    QTest.keyClick(viewer, Qt.Key_M, Qt.ShiftModifier)
+
+    assert viewer.verticalScrollBar().value() == 37
+    rect = viewer._cursor_rect()
+    tops = sorted(line[1] for line in viewer._visible_lines())
+    line_pitch = sorted(b - a for a, b in zip(tops, tops[1:]))[len(tops) // 2]
+    assert abs(rect.center().y() - viewer.viewport().height() / 2) <= line_pitch / 2 + 1
