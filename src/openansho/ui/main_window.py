@@ -1408,8 +1408,12 @@ class MainWindow(QMainWindow):
         The project is in-memory (see `tutorial.open_tutorial_project`), so
         the codes the user creates while working through it are thrown away
         when the app closes and the tutorial starts over on the next launch.
+        Its pre-loaded codes (see `tutorial.TUTORIAL_CODES`) arrive uncolored,
+        so they get their colors here.
         """
         self._set_connection(tutorial.open_tutorial_project(), None)
+        self._reapply_root_colors()
+        self._refresh_codes()
         documents = db.list_documents(self.conn)
         if documents:
             self._select_document(documents[0].id)
@@ -1484,12 +1488,7 @@ class MainWindow(QMainWindow):
             raise RuntimeError("No project open")
         result = project_merge.apply_merge(self.conn, other, plan, use_other, other_label)
         self._migrate_retired_color_classes()
-        for code in db.list_codes(self.conn):
-            if code.parent_id is not None:
-                continue
-            color_class = code.color_class or self._next_color_class()
-            db.set_code_color(self.conn, code.id, color_class, color_class)
-            self._recolor_descendants(code.id, color_class, color_class)
+        self._reapply_root_colors()
         # Repopulating the document list clears its selection, which forgets
         # the open document; reselect it so the user stays where they were.
         document_id = self._current_document_id
@@ -1589,6 +1588,16 @@ class MainWindow(QMainWindow):
                 recolor_children(child.id, child_color)
 
         recolor_children(code_id, color)
+
+    def _reapply_root_colors(self) -> None:
+        """Give every root its color class (a fresh one if it has none) and
+        re-derive its subtree's tints from it."""
+        for code in db.list_codes(self.conn):
+            if code.parent_id is not None:
+                continue
+            color_class = code.color_class or self._next_color_class()
+            db.set_code_color(self.conn, code.id, color_class, color_class)
+            self._recolor_descendants(code.id, color_class, color_class)
 
     def _migrate_retired_color_classes(self) -> None:
         """Move root codes off a retired base color class onto its replacement,
