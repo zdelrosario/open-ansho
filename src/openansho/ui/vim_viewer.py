@@ -160,18 +160,35 @@ class VimTextViewer(VimTextNavigation, QPlainTextEdit):
         self._code_highlights = list(highlights)
         self.viewport().update()
 
-    def _visible_line_starts(self) -> list[int]:
-        """Character positions of the first character of each line currently visible in the viewport."""
-        viewport_bottom = self.viewport().rect().bottom()
-        starts = []
+    def _visible_lines(self) -> list[tuple[int, float, float]]:
+        """Each display line wholly inside the viewport, as `(start, top, bottom)`.
+
+        A display line is a line as wrapped on screen, not a paragraph, so a
+        long wrapped paragraph contributes each of its lines. A line cut off
+        by either edge is left out, since putting the cursor there would
+        scroll the pane — unless nothing fits wholly, when the partly
+        visible lines are better than none.
+        """
+        height = self.viewport().height()
+        offset = self.contentOffset()
+        whole, partial = [], []
         block = self.firstVisibleBlock()
         while block.isValid():
-            top = self.blockBoundingGeometry(block).translated(self.contentOffset()).top()
-            if top > viewport_bottom:
+            geometry = self.blockBoundingGeometry(block).translated(offset)
+            if geometry.top() >= height:
                 break
-            starts.append(block.position())
+            if block.isVisible():
+                layout = block.layout()
+                for index in range(layout.lineCount()):
+                    line = layout.lineAt(index)
+                    top = geometry.top() + line.y()
+                    bottom = top + line.height()
+                    if bottom <= 0 or top >= height:
+                        continue
+                    entry = (block.position() + line.textStart(), top, bottom)
+                    (whole if top >= 0 and bottom <= height else partial).append(entry)
             block = block.next()
-        return starts
+        return whole or partial
 
     
     def _scroll_current_line_to_top(self) -> None:

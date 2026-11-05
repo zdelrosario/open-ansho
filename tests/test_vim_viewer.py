@@ -137,9 +137,9 @@ def test_capital_l_moves_to_last_visible_line(qtbot):
     viewer = _make_viewer(qtbot, text)
     viewer.setFocus()
 
-    starts = viewer._visible_line_starts()
-    assert len(starts) >= 2  # sanity: the viewport shows multiple lines
-    expected_position = starts[-1]
+    lines = viewer._visible_lines()
+    assert len(lines) >= 2  # sanity: the viewport shows multiple lines
+    expected_position = lines[-1][0]
 
     QTest.keyClick(viewer, Qt.Key_L, Qt.ShiftModifier)
 
@@ -147,13 +147,98 @@ def test_capital_l_moves_to_last_visible_line(qtbot):
     assert not viewer.textCursor().hasSelection()
 
 
+def _assert_cursor_line_fully_visible(viewer):
+    rect = viewer.cursorRect()
+    assert rect.top() >= 0
+    assert rect.bottom() < viewer.viewport().height()
+
+
+def _tall_viewer_with_a_partial_last_line(qtbot, text):
+    viewer = _make_viewer(qtbot, text)
+    line_height = viewer.fontMetrics().lineSpacing()
+    # A viewport that ends partway through a line, so there's a line only
+    # partly on screen for H/L/M to wrongly land on.
+    viewer.resize(300, int(line_height * 10.5) + viewer.frameWidth() * 2)
+    viewer.setFocus()
+    return viewer
+
+
+def test_capital_l_does_not_scroll(qtbot):
+    text = "\n".join(f"Line {i}" for i in range(50))
+    viewer = _tall_viewer_with_a_partial_last_line(qtbot, text)
+    scroll_before = viewer.verticalScrollBar().value()
+
+    QTest.keyClick(viewer, Qt.Key_L, Qt.ShiftModifier)
+
+    assert viewer.verticalScrollBar().value() == scroll_before
+    _assert_cursor_line_fully_visible(viewer)
+    # ... and it is the *last* fully visible line.
+    below = QTextCursor(viewer.textCursor())
+    below.movePosition(QTextCursor.Down)
+    assert viewer.cursorRect(below).bottom() >= viewer.viewport().height()
+
+
+def test_capital_l_does_not_scroll_after_scrolling_down(qtbot):
+    text = "\n".join(f"Line {i}" for i in range(50))
+    viewer = _tall_viewer_with_a_partial_last_line(qtbot, text)
+    viewer.verticalScrollBar().setValue(7)
+
+    QTest.keyClick(viewer, Qt.Key_L, Qt.ShiftModifier)
+
+    assert viewer.verticalScrollBar().value() == 7
+    _assert_cursor_line_fully_visible(viewer)
+
+
+def test_capital_m_lands_on_the_line_at_the_middle_of_the_viewport(qtbot):
+    # Wrapped paragraphs of different lengths: counting paragraphs would put
+    # "the middle one" nowhere near the middle of the viewport.
+    paragraphs = ["word " * 120, "short", "short", "short", "word " * 120]
+    viewer = _tall_viewer_with_a_partial_last_line(qtbot, "\n".join(paragraphs))
+    scroll_before = viewer.verticalScrollBar().value()
+
+    QTest.keyClick(viewer, Qt.Key_M, Qt.ShiftModifier)
+
+    assert viewer.verticalScrollBar().value() == scroll_before
+    rect = viewer.cursorRect()
+    middle = viewer.viewport().height() / 2
+    assert abs(rect.center().y() - middle) <= viewer.fontMetrics().lineSpacing() / 2 + 1
+
+
+def test_capital_h_lands_on_the_first_wrapped_line_on_screen(qtbot):
+    viewer = _tall_viewer_with_a_partial_last_line(qtbot, "word " * 400)
+    viewer.verticalScrollBar().setValue(3)
+    scroll_before = viewer.verticalScrollBar().value()
+
+    QTest.keyClick(viewer, Qt.Key_H, Qt.ShiftModifier)
+
+    assert viewer.verticalScrollBar().value() == scroll_before
+    assert viewer.textCursor().position() > 0  # not the paragraph's start, off-screen
+    _assert_cursor_line_fully_visible(viewer)
+
+
 def test_capital_l_falls_back_to_the_only_visible_line(qtbot):
     viewer = _make_viewer(qtbot, "Just one line of text.")
+    # Wide enough not to wrap: the default size differs by platform, and on
+    # Windows it's narrow enough to wrap this onto two screen lines.
+    viewer.resize(600, 200)
     viewer.setFocus()
 
     QTest.keyClick(viewer, Qt.Key_L, Qt.ShiftModifier)
 
     assert viewer.textCursor().position() == 0
+
+
+def test_capital_l_lands_on_the_last_wrapped_line_of_a_paragraph(qtbot):
+    viewer = _make_viewer(qtbot, "Just one line of text, wrapped onto several screen lines.")
+    viewer.resize(120, 200)
+    viewer.setFocus()
+    layout = viewer.document().firstBlock().layout()
+    assert layout.lineCount() >= 2  # sanity: it really does wrap
+    last_line_start = layout.lineAt(layout.lineCount() - 1).textStart()
+
+    QTest.keyClick(viewer, Qt.Key_L, Qt.ShiftModifier)
+
+    assert viewer.textCursor().position() == last_line_start
 
 
 def test_gg_moves_to_document_start(qtbot):
@@ -735,8 +820,50 @@ def test_visual_mode_f_extends_selection(qtbot):
     QTest.keyClicks(viewer, "w")
 
     assert viewer.mode == VimTextViewer.VISUAL
-    assert viewer.textCursor().position() == 18
-    assert viewer.textCursor().selectionStart() == 0
+    assert viewer.textCursor().selectedText() == "Hello frustrating w"
+
+
+def test_visual_mode_repeated_f_does_not_skip_an_adjacent_match(qtbot):
+    viewer = _make_viewer(qtbot, "a bb c")
+    viewer.setFocus()
+
+    QTest.keyClick(viewer, Qt.Key_V)
+    QTest.keyClick(viewer, Qt.Key_F)
+    QTest.keyClicks(viewer, "b")
+    assert viewer.textCursor().selectedText() == "a b"
+    QTest.keyClick(viewer, Qt.Key_F)
+    QTest.keyClicks(viewer, "b")
+    assert viewer.textCursor().selectedText() == "a bb"
+
+
+def test_visual_mode_capital_f_includes_the_match(qtbot):
+    viewer = _make_viewer(qtbot, "Hello frustrating world.")
+    viewer.setFocus()
+    cursor = viewer.textCursor()
+    cursor.setPosition(20)
+    viewer.setTextCursor(cursor)
+
+    QTest.keyClick(viewer, Qt.Key_V)
+    QTest.keyClick(viewer, Qt.Key_F, Qt.ShiftModifier)
+    QTest.keyClicks(viewer, "r")
+
+    assert viewer.textCursor().selectedText() == "rating wo"
+
+
+def test_visual_mode_capital_f_after_f_steps_back_to_the_previous_match(qtbot):
+    viewer = _make_viewer(qtbot, "Hello frustrating world.")
+    viewer.setFocus()
+
+    QTest.keyClick(viewer, Qt.Key_V)
+    QTest.keyClick(viewer, Qt.Key_F)
+    QTest.keyClicks(viewer, "r")
+    QTest.keyClick(viewer, Qt.Key_F)
+    QTest.keyClicks(viewer, "r")
+    assert viewer.textCursor().selectedText() == "Hello frustr"
+
+    QTest.keyClick(viewer, Qt.Key_F, Qt.ShiftModifier)
+    QTest.keyClicks(viewer, "r")
+    assert viewer.textCursor().selectedText() == "Hello fr"
 
 
 # Qt counts an emoji as two cursor positions where Python counts one index,

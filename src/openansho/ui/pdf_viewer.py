@@ -506,18 +506,25 @@ class PdfViewer(VimTextNavigation, QAbstractScrollArea):
         scrollbar = self.verticalScrollBar()
         scrollbar.setValue(int(scrollbar.value() + shift))
 
-    def _visible_line_starts(self) -> list[int]:
-        """Offsets of the first character of each line currently on screen."""
+    def _visible_lines(self) -> list[tuple[int, float, float]]:
+        """Each line wholly on screen, as `(start, top, bottom)` in the viewport.
+
+        Measured with the same rectangle `ensureCursorVisible` checks, so
+        putting the cursor on any of these lines never scrolls the pane. A
+        line cut off by either edge is left out, unless nothing fits wholly.
+        """
         if self._text_map is None:
             return []
-        starts = []
         height = self.viewport().height()
+        whole, partial = [], []
         for page in self._visible_pages():
             for start, _end in self._text_map.display_lines(page):
                 rect = self._cursor_rect(start)
-                if not rect.isEmpty() and 0 <= rect.top() <= height:
-                    starts.append(start)
-        return starts
+                if rect.isEmpty() or rect.bottom() <= 0 or rect.top() >= height:
+                    continue
+                entry = (start, rect.top(), rect.bottom())
+                (whole if rect.top() >= 0 and rect.bottom() <= height else partial).append(entry)
+        return whole or partial
 
     def _line_height(self) -> int:
         rect = self._cursor_rect()
