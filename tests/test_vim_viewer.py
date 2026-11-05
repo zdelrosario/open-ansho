@@ -218,11 +218,27 @@ def test_capital_h_lands_on_the_first_wrapped_line_on_screen(qtbot):
 
 def test_capital_l_falls_back_to_the_only_visible_line(qtbot):
     viewer = _make_viewer(qtbot, "Just one line of text.")
+    # Wide enough not to wrap: the default size differs by platform, and on
+    # Windows it's narrow enough to wrap this onto two screen lines.
+    viewer.resize(600, 200)
     viewer.setFocus()
 
     QTest.keyClick(viewer, Qt.Key_L, Qt.ShiftModifier)
 
     assert viewer.textCursor().position() == 0
+
+
+def test_capital_l_lands_on_the_last_wrapped_line_of_a_paragraph(qtbot):
+    viewer = _make_viewer(qtbot, "Just one line of text, wrapped onto several screen lines.")
+    viewer.resize(120, 200)
+    viewer.setFocus()
+    layout = viewer.document().firstBlock().layout()
+    assert layout.lineCount() >= 2  # sanity: it really does wrap
+    last_line_start = layout.lineAt(layout.lineCount() - 1).textStart()
+
+    QTest.keyClick(viewer, Qt.Key_L, Qt.ShiftModifier)
+
+    assert viewer.textCursor().position() == last_line_start
 
 
 def test_gg_moves_to_document_start(qtbot):
