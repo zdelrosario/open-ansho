@@ -1178,7 +1178,7 @@ class MainWindow(QMainWindow):
         cursor.setPosition(start)
         cursor.setPosition(end, QTextCursor.KeepAnchor)
         self.active_viewer.setTextCursor(cursor)
-        self.active_viewer.ensureCursorVisible()
+        self.active_viewer.center_range(start, end)
 
     def _on_segment_list_context_menu(self, pos) -> None:
         if self.conn is None:
@@ -1805,6 +1805,7 @@ class MainWindow(QMainWindow):
                     points=tuple(region.outline()),
                     colors=tuple(colors_by_region[region.id]),
                     selected=region.text_offset in selected_offsets,
+                    text_offset=region.text_offset,
                 )
                 for region in regions
             ]

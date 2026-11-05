@@ -93,7 +93,8 @@ class RegionMark:
     its four corners, so rectangle and freehand regions draw and hit-test
     through the same path. `colors` is empty for a region nobody has coded
     yet, which is drawn as a bare dashed outline so it stays visible and
-    clickable.
+    clickable. `text_offset` is where the region's marker sits in the text,
+    which is how a coded span covering it finds it on the page.
     """
 
     region_id: int
@@ -101,6 +102,7 @@ class RegionMark:
     points: tuple[tuple[float, float], ...]
     colors: tuple[QColor, ...] = field(default_factory=tuple)
     selected: bool = False
+    text_offset: int = -1
 
 
 def bounding_box(points) -> tuple[float, float, float, float]:
@@ -474,6 +476,35 @@ class PdfViewer(VimTextNavigation, QAbstractScrollArea):
         self.verticalScrollBar().setValue(
             int(offset.y() + rect.center().y() - self.viewport().height() / 2)
         )
+
+    def center_range(self, start: int, end: int) -> None:
+        """Scroll so the span [start, end) sits in the vertical middle of the pane.
+
+        The span is measured by what it covers on the pages — its text and
+        any regions whose markers fall inside it — since a region's marker
+        has no glyph and the caret drawn for it sits at the end of the page's
+        text, nowhere near the region itself. A span taller than the pane
+        goes to the top instead, so its start stays in sight.
+        """
+        if self._text_map is None or end <= start:
+            self.centerCursor()
+            return
+        area = QRectF()
+        for page, rect in self._text_map.rects_for_range(start, end):
+            area = area.united(self.from_page_rect(page, rect))
+        for mark in self._marks:
+            if start <= mark.text_offset < end:
+                area = area.united(self._mark_polygon(mark).boundingRect())
+        if area.isEmpty():
+            self.centerCursor()
+            return
+        height = self.viewport().height()
+        if area.height() > height:
+            shift = area.top()
+        else:
+            shift = area.center().y() - height / 2
+        scrollbar = self.verticalScrollBar()
+        scrollbar.setValue(int(scrollbar.value() + shift))
 
     def _visible_line_starts(self) -> list[int]:
         """Offsets of the first character of each line currently on screen."""
