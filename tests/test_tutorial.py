@@ -125,27 +125,56 @@ def _codes_by_name(conn):
     return {code.name: code for code in db.list_codes(conn)}
 
 
-def test_tutorial_coder_codes_the_introductions_prompts():
+def test_tutorial_coder_codes_the_tutorials_prompts():
     conn = tutorial.open_tutorial_project()
-    intro = db.get_document_by_name(conn, tutorial.DOCUMENT_NAME)
     codes = _codes_by_name(conn)
+    documents = db.list_documents(conn)
 
-    segments = db.list_segments_for_document(conn, intro.id)
     coded = [
-        (intro.content[s.start_offset : s.end_offset], s.code_id, s.created_by)
-        for s in segments
+        (doc.name, doc.content[s.start_offset : s.end_offset], s.code_id, s.created_by)
+        for doc in documents
+        for s in db.list_segments_for_document(conn, doc.id)
     ]
     assert coded == [
-        (passage, codes[code_name].id, tutorial.TUTORIAL_USERNAME)
-        for passage, code_name in tutorial.TUTORIAL_SEGMENTS
+        (document_name, passage, codes[code_name].id, tutorial.TUTORIAL_USERNAME)
+        for document_name, passage, code_name in tutorial.TUTORIAL_SEGMENTS
     ]
-    # Every passage is the inside of one of the introduction's "(...)" prompts.
-    for passage, _code in tutorial.TUTORIAL_SEGMENTS:
-        assert intro.content.count(f"({passage}") == 1
-    # The other documents start uncoded.
-    for doc in db.list_documents(conn):
-        if doc.id != intro.id:
-            assert db.list_segments_for_document(conn, doc.id) == []
+    # Only the introduction and 03 Codebook come pre-coded.
+    assert {name for name, *_ in coded} == {
+        tutorial.DOCUMENT_NAME,
+        tutorial.CODEBOOK_DOCUMENT_NAME,
+    }
+
+
+def test_tutorial_segments_cover_each_prompt_once():
+    """Every passage is the inside of one "(...)" prompt, and a repeated
+    prompt is coded at successive occurrences rather than the first again."""
+    conn = tutorial.open_tutorial_project()
+    content = {doc.name: doc.content for doc in db.list_documents(conn)}
+
+    located = tutorial.tutorial_segment_offsets(content)
+
+    for name, start, end, _code in located:
+        assert content[name][start - 1] == "("
+        assert content[name][end] == ")"
+    assert len({(name, start) for name, start, *_ in located}) == len(located)
+    for name in {name for name, *_ in tutorial.TUTORIAL_SEGMENTS}:
+        for passage in {p for n, p, _c in tutorial.TUTORIAL_SEGMENTS if n == name}:
+            listed = sum(
+                1 for n, p, _c in tutorial.TUTORIAL_SEGMENTS if (n, p) == (name, passage)
+            )
+            assert content[name].count(f"({passage})") == listed
+
+
+def test_tutorial_codebook_document_is_a_text_document():
+    conn = tutorial.open_tutorial_project()
+
+    doc = db.get_document_by_name(conn, tutorial.CODEBOOK_DOCUMENT_NAME)
+    assert doc is not None
+    assert not doc.is_pdf
+    assert doc.content == tutorial.tutorial_file_path(
+        tutorial.CODEBOOK_DOCUMENT_NAME
+    ).read_text(encoding="utf-8")
 
 
 def test_tutorial_codebook_mirrors_the_introductions_structure():
@@ -207,7 +236,10 @@ def test_tutorial_coder_is_hidden_until_enabled_in_the_user_filter(qtbot):
     assert window._code_items_by_id[to_do.id].text(1) == "2/2"
     highlighted = {(h.start, h.end) for h in window.viewer._code_highlights}
     expected = {
-        (s.start_offset, s.end_offset) for s in db.list_all_segments(window.conn)
+        (s.start_offset, s.end_offset)
+        for s in db.list_segments_for_document(
+            window.conn, window._current_document_id
+        )
     }
     assert highlighted == expected
 
