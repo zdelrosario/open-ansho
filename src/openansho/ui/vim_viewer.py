@@ -185,6 +185,33 @@ class VimTextViewer(VimTextNavigation, QPlainTextEdit):
         visible_lines = max(self.viewport().height() // line_height, 1)
         self.verticalScrollBar().setValue(max(block_number - visible_lines + 1, 0))
 
+    def center_range(self, start: int, end: int) -> None:
+        """Scroll so the span [start, end) sits in the vertical middle of the pane.
+
+        A span taller than the pane goes to the top instead, so its start
+        stays in sight. The scrollbar counts lines rather than pixels, so the
+        span lands on the nearest line to the middle.
+        """
+        start_cursor = QTextCursor(self.document())
+        start_cursor.setPosition(start)
+        end_cursor = QTextCursor(self.document())
+        end_cursor.setPosition(max(end, start))
+        # Measure from the span's first line at the top: QPlainTextEdit only
+        # measures a short way above the viewport, and wrongly beyond that.
+        block = start_cursor.block()
+        line = block.layout().lineForTextPosition(start - block.position())
+        scrollbar = self.verticalScrollBar()
+        scrollbar.setValue(block.firstLineNumber() + max(line.lineNumber(), 0))
+        top = self.cursorRect(start_cursor).top()
+        bottom = self.cursorRect(end_cursor).bottom()
+        height = self.viewport().height()
+        if bottom - top > height:
+            shift = top
+        else:
+            shift = (top + bottom) / 2 - height / 2
+        line_height = max(self.fontMetrics().lineSpacing(), 1)
+        scrollbar.setValue(scrollbar.value() + round(shift / line_height))
+
     def _scroll_viewport_lines(self, delta: int) -> None:
         """Handle Ctrl+E/Ctrl+Y: scroll the viewport by one line without moving the cursor."""
         scrollbar = self.verticalScrollBar()
