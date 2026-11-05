@@ -1,3 +1,5 @@
+from PySide6.QtCore import Qt
+
 from openansho import db, tutorial
 from openansho.ui.main_window import TUTORIAL_PROJECT_NAME, MainWindow
 
@@ -16,7 +18,9 @@ def test_tutorial_project_holds_only_the_tutorial_documents():
     assert [doc.name for doc in documents] == list(tutorial.DOCUMENT_NAMES)
     assert documents[0].content == tutorial.read_tutorial_text()
     assert not documents[0].is_pdf
-    assert db.list_codes(conn) == []
+    assert [code.name for code in db.list_codes(conn)] == [
+        name for name, _parent in tutorial.TUTORIAL_CODES
+    ]
 
 
 def test_tutorial_pdf_is_a_pdf_document():
@@ -93,8 +97,12 @@ def test_tutorial_codebook_is_discarded_between_sessions(qtbot):
     qtbot.addWidget(second)
     second.open_tutorial_project()
 
-    assert db.list_codes(second.conn) == []
-    assert db.list_all_segments(second.conn) == []
+    names = [code.name for code in db.list_codes(second.conn)]
+    assert "instructions" not in names
+    assert names == [name for name, _parent in tutorial.TUTORIAL_CODES]
+    assert {s.created_by for s in db.list_all_segments(second.conn)} == {
+        tutorial.TUTORIAL_USERNAME
+    }
 
 
 def test_tutorial_coding_works_end_to_end(qtbot):
@@ -106,6 +114,110 @@ def test_tutorial_coding_works_end_to_end(qtbot):
     window.apply_segment(code.id, 0, 7)
 
     segments = db.list_segments_for_document(window.conn, window._current_document_id)
-    assert [(s.code_id, s.start_offset, s.end_offset) for s in segments] == [
-        (code.id, 0, 7)
+    assert [
+        (s.code_id, s.start_offset, s.end_offset)
+        for s in segments
+        if s.created_by != tutorial.TUTORIAL_USERNAME
+    ] == [(code.id, 0, 7)]
+
+
+def _codes_by_name(conn):
+    return {code.name: code for code in db.list_codes(conn)}
+
+
+def test_tutorial_coder_codes_the_introductions_prompts():
+    conn = tutorial.open_tutorial_project()
+    intro = db.get_document_by_name(conn, tutorial.DOCUMENT_NAME)
+    codes = _codes_by_name(conn)
+
+    segments = db.list_segments_for_document(conn, intro.id)
+    coded = [
+        (intro.content[s.start_offset : s.end_offset], s.code_id, s.created_by)
+        for s in segments
     ]
+    assert coded == [
+        (passage, codes[code_name].id, tutorial.TUTORIAL_USERNAME)
+        for passage, code_name in tutorial.TUTORIAL_SEGMENTS
+    ]
+    # Every passage is the inside of one of the introduction's "(...)" prompts.
+    for passage, _code in tutorial.TUTORIAL_SEGMENTS:
+        assert intro.content.count(f"({passage}") == 1
+    # The other documents start uncoded.
+    for doc in db.list_documents(conn):
+        if doc.id != intro.id:
+            assert db.list_segments_for_document(conn, doc.id) == []
+
+
+def test_tutorial_codebook_mirrors_the_introductions_structure():
+    conn = tutorial.open_tutorial_project()
+    codes = _codes_by_name(conn)
+    by_id = {code.id: code for code in codes.values()}
+
+    parents = {
+        code.name: by_id[code.parent_id].name if code.parent_id else None
+        for code in codes.values()
+    }
+    assert parents == dict(tutorial.TUTORIAL_CODES)
+
+
+# Everything the tutorial documents have the user type into the code filter.
+TUTORIAL_TYPED_NAMES = (
+    "code", "instructions", "ins", "selection", "explanations", "general",
+    "shortcuts", "action", "call", "test", "test1", "test2", "c",
+)
+
+
+def test_tutorial_code_names_never_match_what_the_tutorials_ask_for():
+    for name, _parent in tutorial.TUTORIAL_CODES:
+        for typed in TUTORIAL_TYPED_NAMES:
+            assert typed not in name.lower(), (name, typed)
+
+
+def _user_filter_states(window):
+    model = window.user_filter_combo.model()
+    return {
+        model.item(i).data(): model.item(i).checkState() == Qt.Checked
+        for i in range(model.rowCount())
+    }
+
+
+def _set_user_checked(window, value, checked):
+    model = window.user_filter_combo.model()
+    for i in range(model.rowCount()):
+        if model.item(i).data() == value:
+            model.item(i).setCheckState(Qt.Checked if checked else Qt.Unchecked)
+            return
+    raise AssertionError(f"no user filter entry {value!r}")
+
+
+def test_tutorial_coder_is_hidden_until_enabled_in_the_user_filter(qtbot):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.open_tutorial_project()
+    window.username = "alice"
+    window._apply_active_user_default_filter()
+    to_do = _codes_by_name(window.conn)["To Do"]
+
+    assert _user_filter_states(window) == {tutorial.TUTORIAL_USERNAME: False}
+    assert window._code_items_by_id[to_do.id].text(1) == "0/0"
+    assert window.viewer._code_highlights == []
+
+    _set_user_checked(window, tutorial.TUTORIAL_USERNAME, True)
+
+    assert window._code_items_by_id[to_do.id].text(1) == "2/2"
+    highlighted = {(h.start, h.end) for h in window.viewer._code_highlights}
+    expected = {
+        (s.start_offset, s.end_offset) for s in db.list_all_segments(window.conn)
+    }
+    assert highlighted == expected
+
+
+def test_tutorial_codes_are_colored_like_any_other(qtbot):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.open_tutorial_project()
+
+    codes = _codes_by_name(window.conn)
+    assert all(code.color and code.color_class for code in codes.values())
+    assert codes["Highlight"].color_class == codes["To Do"].color_class
+    assert codes["Highlight"].color != codes["To Do"].color
