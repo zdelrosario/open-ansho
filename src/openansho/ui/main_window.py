@@ -816,24 +816,39 @@ class MainWindow(QMainWindow):
         self.username_label.setText(self.username or NO_USERNAME_TEXT)
 
     def _on_import_document(self) -> None:
-        path_str, _ = QFileDialog.getOpenFileName(self, "Import Document", "", TEXT_FILTER)
-        if not path_str:
+        # Plural, so the dialog accepts a shift/ctrl-click multi-selection.
+        path_strs, _ = QFileDialog.getOpenFileNames(
+            self, "Import Documents", "", TEXT_FILTER
+        )
+        if not path_strs:
             return
-        path = Path(path_str)
-        if self.conn is not None and db.get_document_by_name(self.conn, path.name) is not None:
-            reply = QMessageBox.question(
-                self,
-                "Document Already Imported",
-                f"A document named “{path.name}” has already been imported. "
-                "Overwrite it?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No,
-            )
-            if reply != QMessageBox.Yes:
-                return
-            self.import_document(path, overwrite=True)
-            return
-        self.import_document(path)
+        several = len(path_strs) > 1
+        buttons = QMessageBox.Yes | QMessageBox.No
+        if several:
+            buttons |= QMessageBox.YesToAll | QMessageBox.NoToAll
+        # Set once the user answers "to All", so later duplicates skip the prompt.
+        blanket_answer = None
+        for path_str in path_strs:
+            path = Path(path_str)
+            if self.conn is not None and db.get_document_by_name(self.conn, path.name) is not None:
+                reply = blanket_answer
+                if reply is None:
+                    reply = QMessageBox.question(
+                        self,
+                        "Document Already Imported",
+                        f"A document named “{path.name}” has already been imported. "
+                        "Overwrite it?",
+                        buttons,
+                        QMessageBox.No,
+                    )
+                    if reply == QMessageBox.YesToAll:
+                        blanket_answer = reply = QMessageBox.Yes
+                    elif reply == QMessageBox.NoToAll:
+                        blanket_answer = reply = QMessageBox.No
+                if reply == QMessageBox.Yes:
+                    self.import_document(path, overwrite=True)
+                continue
+            self.import_document(path)
 
     def _on_merge_project(self) -> None:
         if self.conn is None:
@@ -1043,7 +1058,7 @@ class MainWindow(QMainWindow):
         new_child_action = menu.addAction("New Child Code…")
         rename_action = menu.addAction("Rename…")
         edit_description_action = menu.addAction("Edit Description…")
-        unparent_action = menu.addAction("Move to Top Level")
+        unparent_action = menu.addAction("Unparent (move to top level)")
         unparent_action.setEnabled(code is not None and code.parent_id is not None)
 
         # Child codes take their color from their root ancestor, so the menu is
