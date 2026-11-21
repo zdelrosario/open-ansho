@@ -1043,7 +1043,7 @@ class MainWindow(QMainWindow):
         new_child_action = menu.addAction("New Child Code…")
         rename_action = menu.addAction("Rename…")
         edit_description_action = menu.addAction("Edit Description…")
-        unparent_action = menu.addAction("Move to Top Level")
+        unparent_action = menu.addAction("Unparent (move to top level)")
         unparent_action.setEnabled(code is not None and code.parent_id is not None)
 
         # Child codes take their color from their root ancestor, so the menu is

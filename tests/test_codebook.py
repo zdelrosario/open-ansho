@@ -322,7 +322,7 @@ def test_code_context_menu_moves_a_child_code_to_the_top_level(qtbot, tmp_path, 
     child = window.add_code("Frustration", parent_id=parent.id)
     child_item = window.code_tree.topLevelItem(0).child(0)
 
-    _stub_context_menu_choosing(monkeypatch, "Move to Top Level")
+    _stub_context_menu_choosing(monkeypatch, "Unparent (move to top level)")
     window._on_code_context_menu(_item_center(window.code_tree, child_item))
 
     assert db.get_code(window.conn, child.id).parent_id is None
@@ -341,10 +341,10 @@ def test_code_context_menu_disables_move_to_top_level_for_a_root_code(qtbot, tmp
     window.add_code("Emotions")
     root_item = window.code_tree.topLevelItem(0)
 
-    captured = _stub_context_menu_choosing(monkeypatch, "Move to Top Level")
+    captured = _stub_context_menu_choosing(monkeypatch, "Unparent (move to top level)")
     window._on_code_context_menu(_item_center(window.code_tree, root_item))
 
-    assert not captured["actions"]["Move to Top Level"].isEnabled()
+    assert not captured["actions"]["Unparent (move to top level)"].isEnabled()
 
 
 def test_opening_project_migrates_retired_color_class(qtbot, tmp_path):
