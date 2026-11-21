@@ -421,6 +421,37 @@ def test_v_again_exits_visual_mode_and_clears_selection(qtbot):
     assert not viewer.textCursor().hasSelection()
 
 
+def test_y_in_visual_mode_copies_selection_and_returns_to_normal(qtbot):
+    from PySide6.QtGui import QGuiApplication
+
+    viewer = _make_viewer(qtbot)
+    viewer.setFocus()
+    QGuiApplication.clipboard().setText("")
+
+    QTest.keyClick(viewer, Qt.Key_W)
+    QTest.keyClick(viewer, Qt.Key_V)
+    QTest.keyClick(viewer, Qt.Key_J)  # spans the newline
+    QTest.keyClick(viewer, Qt.Key_Y)
+
+    assert QGuiApplication.clipboard().text() == "frustrating world.\nSecond"
+    assert viewer.mode == VimTextViewer.NORMAL
+    assert not viewer.textCursor().hasSelection()
+    assert viewer.textCursor().position() == 6
+
+
+def test_y_in_normal_mode_leaves_clipboard_alone(qtbot):
+    from PySide6.QtGui import QGuiApplication
+
+    viewer = _make_viewer(qtbot)
+    viewer.setFocus()
+    QGuiApplication.clipboard().setText("untouched")
+
+    QTest.keyClick(viewer, Qt.Key_Y)
+
+    assert QGuiApplication.clipboard().text() == "untouched"
+    assert viewer.mode == VimTextViewer.NORMAL
+
+
 def test_escape_exits_visual_mode_and_clears_selection(qtbot):
     viewer = _make_viewer(qtbot)
     viewer.setFocus()

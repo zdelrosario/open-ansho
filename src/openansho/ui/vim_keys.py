@@ -32,7 +32,7 @@ from __future__ import annotations
 import re
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QTextCursor
+from PySide6.QtGui import QGuiApplication, QTextCursor
 
 from openansho import text_offsets
 
@@ -100,6 +100,24 @@ class VimTextNavigation:
         cursor.setPosition(end, QTextCursor.KeepAnchor)
         self.setTextCursor(cursor)
         self.ensureCursorVisible()
+
+    def yank_selection(self) -> None:
+        """Copy the visual selection to the clipboard and return to normal
+        mode with the cursor at the selection's start, as vim's `y` does.
+
+        The text is sliced from `toPlainText()` rather than taken from
+        `QTextCursor.selectedText()`, which would hand back U+2029 paragraph
+        separators where the document has newlines.
+        """
+        if self.mode != self.VISUAL:
+            return
+        cursor = self.textCursor()
+        start, end = cursor.selectionStart(), cursor.selectionEnd()
+        QGuiApplication.clipboard().setText(self.toPlainText()[start:end])
+        self.exit_visual_mode()
+        cursor = self.textCursor()
+        cursor.setPosition(start)
+        self.setTextCursor(cursor)
 
     def enter_insert_mode(self) -> None:
         if self.mode == self.INSERT or not self.supports_insert_mode:
@@ -218,6 +236,12 @@ class VimTextNavigation:
 
         if key == Qt.Key_Y and event.modifiers() & Qt.ControlModifier:
             self._scroll_viewport_lines(-1)
+            event.accept()
+            return
+
+        if key == Qt.Key_Y and not shift:
+            if self.mode == self.VISUAL:
+                self.yank_selection()
             event.accept()
             return
 
