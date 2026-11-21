@@ -326,6 +326,8 @@ class MainWindow(QMainWindow):
         self.document_list = QListWidget()
         self.document_list.setObjectName("documentPane")
         self.document_list.currentItemChanged.connect(self._on_document_selected)
+        self.document_list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.document_list.customContextMenuRequested.connect(self._on_document_context_menu)
 
         self.viewer = VimTextViewer()
         self.viewer.setObjectName("viewerPane")
@@ -1090,6 +1092,41 @@ class MainWindow(QMainWindow):
         elif chosen is delete_action:
             self._on_delete_code(code_id, item.text(0))
 
+    def _on_document_context_menu(self, pos) -> None:
+        if self.conn is None:
+            return
+        item = self.document_list.itemAt(pos)
+        if item is None:
+            return
+        menu = QMenu(self)
+        delete_action = menu.addAction("Delete…")
+        chosen = self._exec_context_menu(menu, self.document_list.viewport().mapToGlobal(pos))
+        if chosen is delete_action:
+            self._on_delete_document(item.data(Qt.UserRole), item.text())
+
+    def _on_delete_document(self, document_id: int, name: str) -> None:
+        if self._confirm_delete_document(name):
+            self.delete_document(document_id)
+
+    def _confirm_delete_document(self, name: str) -> bool:
+        """Ask before deleting, with buttons that say what they do.
+
+        Kept separate so tests can stub the modal dialog out.
+        """
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Question)
+        box.setWindowTitle("Delete Document")
+        box.setText(
+            f"Delete “{name}”? Its coded segments will be removed; the codes "
+            "themselves stay in the codebook. This cannot be undone."
+        )
+        delete_button = box.addButton("Delete", QMessageBox.DestructiveRole)
+        cancel_button = box.addButton("Cancel", QMessageBox.RejectRole)
+        box.setDefaultButton(cancel_button)
+        box.setEscapeButton(cancel_button)
+        box.exec()
+        return box.clickedButton() is delete_button
+
     def _on_new_child_code(self, parent_id: int) -> None:
         name, ok = QInputDialog.getText(self, "New Child Code", "Code name:")
         if not ok or not name.strip():
@@ -1629,6 +1666,27 @@ class MainWindow(QMainWindow):
         db.merge_codes(self.conn, keep_id, merge_id)
         if self._last_selected_code_id == merge_id:
             self._last_selected_code_id = None
+        self._refresh_user_filter()
+        self._refresh_codes()
+        self._refresh_highlights()
+        self._render_segments_panel()
+
+    def delete_document(self, document_id: int) -> None:
+        """Remove a document along with its coded segments and PDF regions.
+
+        The codebook is left alone: every code survives, even one whose only
+        segments were in this document. The rows go by the schema's
+        `ON DELETE CASCADE` on `segments` and `regions`.
+        """
+        if self.conn is None:
+            raise RuntimeError("No project open")
+        db.delete_document(self.conn, document_id)
+        # Repopulating the list clears its selection, which forgets the open
+        # document; reselect it unless it was the one deleted.
+        current_id = self._current_document_id
+        self._refresh_documents()
+        if current_id is not None and current_id != document_id:
+            self._select_document(current_id)
         self._refresh_user_filter()
         self._refresh_codes()
         self._refresh_highlights()
